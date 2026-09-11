@@ -150,8 +150,22 @@ export function VideoPlayer({
   }, [doSaveProgress]);
 
   useEffect(() => {
-    return () => doSaveProgress();
-  }, [doSaveProgress]);
+    // Captura o nó agora (continua válido até o desmonte de verdade) pra
+    // não ler videoRef.current dentro do cleanup, que já pode ter mudado.
+    const videoNode = videoRef.current;
+    return () => {
+      // Os valores (currentTime/duration) são lidos AGORA, no desmonte, com
+      // o elemento ainda válido — mas a chamada que atualiza estado
+      // (saveProgress) é adiada pra depois do commit atual. Esse desmonte
+      // quase sempre acontece junto de uma troca de rota (usuário saindo
+      // do player) — chamar setState de um contexto ancestral de forma
+      // síncrona bem no meio dessa transição pode fazer o React/Next.js
+      // abandonar a navegação em andamento silenciosamente.
+      if (!videoNode || !videoNode.duration) return;
+      const snapshot = { t: videoNode.currentTime, d: videoNode.duration };
+      setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
+    };
+  }, [saveProgress, titleId, episodeId]);
 
   function togglePlay() {
     const v = videoRef.current;
