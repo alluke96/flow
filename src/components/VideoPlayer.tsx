@@ -423,7 +423,18 @@ export function VideoPlayer({
         }}
         onPause={() => {
           setPlaying(false);
-          doSaveProgress();
+          // O navegador dispara "pause" nativamente ao remover o <video> do
+          // DOM — o que acontece bem no meio de uma troca de rota (ex:
+          // clicar em "voltar" com o vídeo tocando). Chamar doSaveProgress
+          // aqui de forma síncrona atualiza um contexto ancestral (perfis)
+          // nesse exato instante, o que pode fazer o React/Next.js abortar
+          // silenciosamente a transição em andamento — o botão "voltar"
+          // parece simplesmente não fazer nada. Mesmo problema (e mesma
+          // correção) do efeito de cleanup logo abaixo: adiar pro próximo
+          // tick tira a chamada do meio do commit da transição. Só afeta o
+          // timing do autosave em ~0ms; se o componente já tiver
+          // desmontado antes de rodar, o cleanup effect cobre o save.
+          setTimeout(doSaveProgress, 0);
         }}
         onEnded={handleEnded}
         onClick={handleVideoAreaClick}

@@ -1009,6 +1009,13 @@ a {
   flex: 1;
 }
 .player-controls-row button {
+  /* O reset global de <button> força min-width/min-height: 44px (alvo de
+     toque). O conteúdo aqui (ícone 20px + padding 8px) é menor que isso,
+     então sem centralizar por flex o espaço extra ficava só de um lado —
+     o botão (e o hover, mais visível ainda) ficava "torto"/descentralizado. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.9;
   border-radius: 8px;
   padding: 8px;
