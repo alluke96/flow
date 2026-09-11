@@ -60,6 +60,7 @@ export function VideoPlayer({
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ t: number } | null>(null);
   const draggingRef = useRef(false);
+  const dragPctRef = useRef<number | null>(null);
 
   const { saveProgress } = useProfiles();
 
@@ -79,6 +80,10 @@ export function VideoPlayer({
   const [ended, setEnded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [playbackError, setPlaybackError] = useState(false);
+  // depois do primeiro play, um "waiting" (rebuffer no meio de um seek, por
+  // exemplo) não deve mais esconder os botões atrás de um spinner — só o
+  // carregamento inicial faz isso
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<{ pct: number; time: number } | null>(null);
 
@@ -159,14 +164,20 @@ export function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     const max = v.duration || Infinity;
-    v.currentTime = Math.min(Math.max(0, v.currentTime + delta), max);
+    const next = Math.min(Math.max(0, v.currentTime + delta), max);
+    v.currentTime = next;
+    // feedback visual na hora (barra/tempo) sem esperar o próximo evento
+    // `timeupdate` do navegador, que pode demorar a disparar depois de um seek
+    setCurrentTime(next);
     showOverlay();
   }
 
   function seekToPct(pct: number) {
     const v = videoRef.current;
     if (!v || !v.duration) return;
-    v.currentTime = Math.min(Math.max(0, pct), 1) * v.duration;
+    const next = Math.min(Math.max(0, pct), 1) * v.duration;
+    v.currentTime = next;
+    setCurrentTime(next);
   }
 
   function pctFromClientX(clientX: number): number {
@@ -180,18 +191,29 @@ export function VideoPlayer({
     draggingRef.current = true;
     setDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
-    const pct = pctFromClientX(e.clientX);
+    const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
+    dragPctRef.current = pct;
+    // clique simples (sem arrastar) já busca a posição na hora
     seekToPct(pct);
-    if (duration) setPreview({ pct: Math.min(Math.max(0, pct), 1), time: pct * duration });
+    if (duration) setPreview({ pct, time: pct * duration });
     showOverlay();
   }
   function handleProgressPointerMove(e: PointerEvent<HTMLDivElement>) {
     const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
     if (duration) setPreview({ pct, time: pct * duration });
-    if (draggingRef.current) seekToPct(pct);
+    if (draggingRef.current) {
+      // Enquanto arrasta, só atualiza o preview (visual) — buscar a cada
+      // pixel de movimento faz um request novo pro Drive a cada tick e
+      // trava tudo. O seek de verdade só acontece uma vez, ao soltar.
+      dragPctRef.current = pct;
+    }
   }
   function handleProgressPointerUp() {
+    if (draggingRef.current && dragPctRef.current !== null) {
+      seekToPct(dragPctRef.current);
+    }
     draggingRef.current = false;
+    dragPctRef.current = null;
     setDragging(false);
     setPreview(null);
   }
@@ -344,7 +366,10 @@ export function VideoPlayer({
         onTouchEnd={handleTouchEnd}
         onWaiting={() => setLoading(true)}
         onCanPlay={() => setLoading(false)}
-        onPlaying={() => setLoading(false)}
+        onPlaying={() => {
+          setLoading(false);
+          setHasPlayedOnce(true);
+        }}
         onError={() => {
           // navegador não conseguiu decodificar/abrir o arquivo (contêiner
           // não suportado, ex: .mkv no Chrome/Safari, arquivo corrompido...)
@@ -354,14 +379,18 @@ export function VideoPlayer({
         }}
       />
 
-      <div className={`player-overlay${overlayHidden ? " hidden" : ""}`}>
-        <div className="player-top">
-          <button onClick={onExit} aria-label="Voltar">
-            <BackArrowIcon />
-          </button>
-          <div className="player-title">{displayTitle}</div>
-        </div>
+      {/* Fora da camada que soma opacidade/pointer-events com o resto dos
+          controles: sair do player precisa funcionar sempre, mesmo com o
+          overlay escondido por inatividade — não devia exigir um primeiro
+          toque só pra "acordar" os controles antes de conseguir voltar. */}
+      <div className="player-top">
+        <button onClick={onExit} aria-label="Voltar">
+          <BackArrowIcon />
+        </button>
+        <div className="player-title">{displayTitle}</div>
+      </div>
 
+      <div className={`player-overlay${overlayHidden ? " hidden" : ""}`}>
         {playbackError ? (
           <div className="player-center">
             <div className="player-error">
@@ -372,22 +401,30 @@ export function VideoPlayer({
               </p>
             </div>
           </div>
-        ) : loading ? (
+        ) : loading && !hasPlayedOnce ? (
+          // carregamento inicial: ainda não há nada pra interagir mesmo
           <div className="player-center">
             <div className="spinner" />
           </div>
         ) : (
+          // depois do primeiro play, um rebuffer (ex: logo após um seek) não
+          // esconde mais os botões — só troca o play/pause por um spinner
+          // pequeno, ±10s continuam clicáveis normalmente
           <div className="player-center">
             <button onClick={() => seekBy(-10)} aria-label="Voltar 10 segundos">
               <Back10Icon />
             </button>
-            <button
-              className="player-playpause"
-              onClick={togglePlay}
-              aria-label={playing ? "Pausar" : "Reproduzir"}
-            >
-              {playing ? <PauseIcon /> : <PlayIcon />}
-            </button>
+            {loading ? (
+              <div className="spinner spinner-inline" />
+            ) : (
+              <button
+                className="player-playpause"
+                onClick={togglePlay}
+                aria-label={playing ? "Pausar" : "Reproduzir"}
+              >
+                {playing ? <PauseIcon /> : <PlayIcon />}
+              </button>
+            )}
             <button onClick={() => seekBy(10)} aria-label="Avançar 10 segundos">
               <Forward10Icon />
             </button>

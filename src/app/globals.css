@@ -678,10 +678,18 @@ a {
   pointer-events: none;
 }
 .player-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: max(20px, env(safe-area-inset-top)) clamp(16px, 3vw, 40px) 20px;
+  padding: max(20px, env(safe-area-inset-top)) clamp(16px, 3vw, 40px) 32px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
+  /* sempre visível/clicável — não soma opacity/pointer-events com
+     .player-overlay.hidden (ver comentário no componente) */
 }
 .player-title {
   font-size: 15px;
@@ -892,6 +900,13 @@ a {
   border: 3px solid rgba(255, 255, 255, 0.2);
   border-top-color: var(--text);
   animation: spin 0.8s linear infinite;
+}
+/* rebuffer no meio da reprodução (ex: logo após um seek) — ocupa o mesmo
+   lugar do botão de play/pause em vez de esconder o resto dos controles */
+.spinner-inline {
+  width: 40px;
+  height: 40px;
+  margin: 14px;
 }
 @keyframes spin {
   to {
