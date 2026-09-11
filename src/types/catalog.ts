@@ -29,6 +29,14 @@ export interface TitleSummary {
   sinopse: string;
   /** Quantas temporadas, só para séries — usado nos cards/metadados sem buscar o detalhe inteiro. */
   totalTemporadas?: number;
+  /**
+   * false quando a pasta existe no Drive mas ainda não tem conteúdo
+   * jogável (filme sem arquivo de vídeo, ou série sem nenhum episódio em
+   * nenhuma temporada) — permite avisar "ainda não disponível" em vez de
+   * deixar o usuário cair num player quebrado. Ausente/undefined == true
+   * (mock e dados antigos sempre "disponíveis").
+   */
+  disponivel?: boolean;
 }
 
 export interface TitleDetail extends TitleSummary {

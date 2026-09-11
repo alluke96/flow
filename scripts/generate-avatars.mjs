@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs";
 
 mkdirSync("public/avatars", { recursive: true });
 
-const COUNT = 16;
+const COUNT = 15;
 
 function shapeFor(i) {
   const kind = i % 4;

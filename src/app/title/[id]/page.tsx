@@ -28,6 +28,7 @@ function TitleDetailInner() {
   const [loading, setLoading] = useState(() => !getCachedTitle(id));
   const [notFound, setNotFound] = useState(false);
   const [seasonIdx, setSeasonIdx] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -85,6 +86,19 @@ function TitleDetailInner() {
   const inList = isInWatchlist(title.id);
   const season = title.temporadas?.[seasonIdx];
 
+  function handlePlay() {
+    if (title!.disponivel === false) {
+      setUnavailable(true);
+      return;
+    }
+    router.push(`/watch/${title!.id}`);
+  }
+
+  function handleSelectSeason(i: number) {
+    setSeasonIdx(i);
+    setUnavailable(false);
+  }
+
   return (
     <div>
       <div className="detail-banner">
@@ -102,7 +116,7 @@ function TitleDetailInner() {
           <p className="detail-cast">Com {title.elenco.join(", ")}</p>
         )}
         <div className="detail-actions">
-          <button className="btn-hero play" onClick={() => router.push(`/watch/${title.id}`)}>
+          <button className="btn-hero play" onClick={handlePlay}>
             ▶ Assistir
           </button>
           <button
@@ -114,6 +128,7 @@ function TitleDetailInner() {
             {inList ? "✓" : "+"}
           </button>
         </div>
+        {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
 
         {title.tipo === "serie" && title.temporadas && title.temporadas.length > 0 && (
           <>
@@ -122,43 +137,49 @@ function TitleDetailInner() {
                 <button
                   key={s.numero}
                   className={`season-chip${i === seasonIdx ? " active" : ""}`}
-                  onClick={() => setSeasonIdx(i)}
+                  onClick={() => handleSelectSeason(i)}
                 >
                   Temporada {s.numero}
                 </button>
               ))}
             </div>
-            <div key={seasonIdx} className="episode-list">
-              {season?.episodios.map((ep, i) => (
-                <button
-                  key={ep.id}
-                  className="episode"
-                  onClick={() => router.push(`/watch/${title.id}?ep=${encodeURIComponent(ep.id)}`)}
-                >
-                  <div className="ep-num">{i + 1}</div>
-                  <div className="ep-thumb">
-                    <img
-                      src={season ? seasonImageUrl(title.id, season.numero) : bannerUrl(title.id)}
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => {
-                        // temporada sem capa.jpg própria -> cai pro banner do título
-                        // (guarda por dataset pra não entrar em loop se o banner também falhar)
-                        const img = e.currentTarget;
-                        if (img.dataset.fallback) return;
-                        img.dataset.fallback = "1";
-                        img.src = bannerUrl(title.id);
-                      }}
-                    />
-                  </div>
-                  <div className="ep-info">
-                    <div className="ep-title">{ep.titulo}</div>
-                    <div className="ep-dur">{ep.duracaoMinutos ? `${ep.duracaoMinutos}min` : ""}</div>
-                  </div>
-                  <div className="ep-play">▶</div>
-                </button>
-              ))}
-            </div>
+            {season && season.episodios.length === 0 ? (
+              <p key={seasonIdx} className="unavailable-notice fade-in">
+                Ainda não disponível.
+              </p>
+            ) : (
+              <div key={seasonIdx} className="episode-list">
+                {season?.episodios.map((ep, i) => (
+                  <button
+                    key={ep.id}
+                    className="episode"
+                    onClick={() => router.push(`/watch/${title.id}?ep=${encodeURIComponent(ep.id)}`)}
+                  >
+                    <div className="ep-num">{i + 1}</div>
+                    <div className="ep-thumb">
+                      <img
+                        src={season ? seasonImageUrl(title.id, season.numero) : bannerUrl(title.id)}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          // temporada sem capa.jpg própria -> cai pro banner do título
+                          // (guarda por dataset pra não entrar em loop se o banner também falhar)
+                          const img = e.currentTarget;
+                          if (img.dataset.fallback) return;
+                          img.dataset.fallback = "1";
+                          img.src = bannerUrl(title.id);
+                        }}
+                      />
+                    </div>
+                    <div className="ep-info">
+                      <div className="ep-title">{ep.titulo}</div>
+                      <div className="ep-dur">{ep.duracaoMinutos ? `${ep.duracaoMinutos}min` : ""}</div>
+                    </div>
+                    <div className="ep-play">▶</div>
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

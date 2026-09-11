@@ -206,6 +206,10 @@ async function scanTitleFolder(
         })),
       })
     );
+    // Série "disponível" = tem pelo menos um episódio em alguma temporada.
+    // Uma pasta de temporada criada mas ainda vazia (ex: aguardando upload)
+    // não trava nada — só fica marcada como indisponível até ter conteúdo.
+    entry.detail.disponivel = seasons.some((s) => s.episodios.length > 0);
   } else {
     entry.detail.tipo = (info?.tipo as TitleType) ?? "filme";
     const videoFile = children.find((f) => VIDEO_EXT_RE.test(f.name));
@@ -214,6 +218,7 @@ async function scanTitleFolder(
       entry.movieMime = videoFile.mimeType;
       entry.movieSize = videoFile.size ? parseInt(videoFile.size, 10) : 0;
     }
+    entry.detail.disponivel = Boolean(entry.movieFileId);
   }
 
   return entry;

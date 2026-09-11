@@ -56,6 +56,7 @@ export const driveCatalogSource: CatalogSource = {
       duracaoMinutos: entry.detail.duracaoMinutos,
       sinopse: entry.detail.sinopse,
       totalTemporadas: entry.detail.totalTemporadas,
+      disponivel: entry.detail.disponivel,
     }));
   },
 

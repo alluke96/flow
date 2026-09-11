@@ -4,7 +4,7 @@
  * Gerados uma única vez por scripts/generate-avatars.mjs.
  */
 export const AVATAR_IDS = Array.from(
-  { length: 16 },
+  { length: 15 },
   (_, i) => `avatar-${String(i + 1).padStart(2, "0")}`
 );
 
