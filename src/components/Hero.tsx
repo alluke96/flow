@@ -8,11 +8,11 @@ import { bannerUrl } from "@/lib/api-client";
 import { metaLine } from "@/lib/format";
 import { useProfiles } from "@/context/profile-context";
 
-const ROTATE_MS = 5000;
+const ROTATE_MS = 10000;
 // Tem que bater com a duração da animação de .hero-bg-current no CSS —
 // depois desse tempo a camada de baixo (imagem anterior) some, porque a
 // de cima já terminou de entrar e está cobrindo ela por completo.
-const FADE_MS = 800;
+const FADE_MS = 900;
 
 export function Hero({ titles }: { titles: TitleSummary[] }) {
   const router = useRouter();

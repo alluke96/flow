@@ -381,9 +381,11 @@ a {
   background-position: center;
 }
 /* camada de baixo: a imagem anterior, parada em opacidade 1 — some quando
-   a de cima termina de entrar, dando o efeito de crossfade entre slides */
+   a de cima termina de entrar, dando o efeito de crossfade entre slides.
+   Curva suave de aceleração/desaceleração (em vez de "ease" linear demais
+   no começo/fim) pra não parecer um corte brusco. */
 .hero-bg-current {
-  animation: fade-in 0.8s ease both;
+  animation: fade-in 0.9s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .hero-fade {
   position: absolute;
@@ -399,7 +401,7 @@ a {
   position: relative;
   padding: 0 clamp(16px, 4vw, 48px) 48px;
   max-width: 640px;
-  animation: fade-in-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: fade-in-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .hero-title {
   font-size: clamp(32px, 5.5vw, 64px);
