@@ -35,6 +35,13 @@ interface VideoPlayerProps {
   onNextEpisode?: () => void;
 }
 
+/** APIs não-padrão do WebKit/iOS Safari pra fullscreen do <video>. */
+interface WebkitVideoElement extends HTMLVideoElement {
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+  webkitDisplayingFullscreen?: boolean;
+}
+
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const OVERLAY_HIDE_MS = 3200;
 const DOUBLE_TAP_MS = 320;
@@ -68,12 +75,10 @@ export function VideoPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);
-  // Começa mudo de propósito: navegadores só garantem autoplay se o vídeo
-  // iniciar sem som (política padrão desde Chrome/Safari/Firefox recentes).
-  // O usuário desmuta pelo próprio controle de volume — sem isso, o play()
-  // automático falha silenciosamente e o vídeo fica parado esperando um
-  // clique manual.
-  const [muted, setMuted] = useState(true);
+  // Tenta iniciar com som (ver handleLoadedMetadata) — só cai pra mudo se
+  // o navegador bloquear autoplay com som, daí sim precisa começar mudo pra
+  // garantir que ao menos toque sozinho.
+  const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [rate, setRate] = useState(1);
   const [overlayHidden, setOverlayHidden] = useState(false);
@@ -126,9 +131,22 @@ export function VideoPlayer({
     if (initialTime > 1 && initialTime < (v.duration || Infinity) - 2) {
       v.currentTime = initialTime;
     }
-    v.play().catch(() => {
-      // autoplay bloqueado (política do navegador) — usuário pode dar play manualmente
-    });
+    // Tenta autoplay COM som primeiro (como YouTube/Netflix) — só cai pra
+    // mudo se o navegador rejeitar. Isso funciona sempre que o navegador já
+    // "confia" no site pra tocar som sozinho (ex: usuário já assistiu algo
+    // aqui com som antes); é a política de autoplay do navegador, não tem
+    // como forçar passar por cima dela, só tentar da forma mais provável de
+    // funcionar e cair pra mudo graciosamente quando não der.
+    v.muted = false;
+    v.play()
+      .then(() => setMuted(false))
+      .catch(() => {
+        v.muted = true;
+        setMuted(true);
+        v.play().catch(() => {
+          // nem mudo tocou sozinho — fica pausado, usuário dá play manualmente
+        });
+      });
   }
 
   function handleProgress() {
@@ -307,7 +325,20 @@ export function VideoPlayer({
   }
 
   function toggleFullscreen() {
-    const container = videoRef.current?.closest(".player-shell");
+    const v = videoRef.current as WebkitVideoElement | null;
+    if (!v) return;
+
+    // iOS Safari não implementa Fullscreen API padrão em elementos
+    // genéricos — só o próprio <video> sabe entrar em fullscreen, por uma
+    // API própria da Apple. Sem isso, o botão simplesmente não faz nada
+    // em iPhone/iPad.
+    if (v.webkitEnterFullscreen) {
+      if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen?.();
+      else v.webkitEnterFullscreen();
+      return;
+    }
+
+    const container = v.closest(".player-shell");
     if (!(container instanceof HTMLElement)) return;
     if (!document.fullscreenElement) container.requestFullscreen().catch(() => {});
     else document.exitFullscreen();
@@ -319,7 +350,24 @@ export function VideoPlayer({
       setIsFullscreen(Boolean(document.fullscreenElement));
     }
     document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
+
+    // iOS não dispara "fullscreenchange" pro fullscreen nativo do <video> —
+    // tem seus próprios eventos.
+    const v = videoRef.current as WebkitVideoElement | null;
+    function onBegin() {
+      setIsFullscreen(true);
+    }
+    function onEnd() {
+      setIsFullscreen(false);
+    }
+    v?.addEventListener("webkitbeginfullscreen", onBegin);
+    v?.addEventListener("webkitendfullscreen", onEnd);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      v?.removeEventListener("webkitbeginfullscreen", onBegin);
+      v?.removeEventListener("webkitendfullscreen", onEnd);
+    };
   }, []);
 
   useEffect(() => {
@@ -362,7 +410,6 @@ export function VideoPlayer({
         className="player-video"
         src={src}
         playsInline
-        autoPlay
         muted={muted}
         disablePictureInPicture
         disableRemotePlayback
