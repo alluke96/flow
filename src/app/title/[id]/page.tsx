@@ -20,7 +20,7 @@ function TitleDetailInner() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const router = useRouter();
-  const { isInWatchlist, toggleWatchlist } = useProfiles();
+  const { isInWatchlist, toggleWatchlist, getProgress } = useProfiles();
   // Se o título já foi visto nesta sessão (ex: voltando do player), mostra
   // na hora em vez de piscar uma tela de loading pra buscar algo que já
   // temos — a busca ainda roda em segundo plano pra manter atualizado.
@@ -85,6 +85,7 @@ function TitleDetailInner() {
 
   const inList = isInWatchlist(title.id);
   const season = title.temporadas?.[seasonIdx];
+  const progress = getProgress(title.id);
 
   function handlePlay() {
     if (title!.disponivel === false) {
@@ -117,7 +118,7 @@ function TitleDetailInner() {
         )}
         <div className="detail-actions">
           <button className="btn-hero play" onClick={handlePlay}>
-            ▶ Assistir
+            ▶ {progress ? "Continuar assistindo" : "Assistir"}
           </button>
           <button
             className={`btn-icon${inList ? " active" : ""}`}

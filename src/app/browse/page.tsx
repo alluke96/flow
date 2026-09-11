@@ -105,6 +105,7 @@ function BrowseInner() {
               title={r.title}
               items={r.items}
               progressMap={r.title === "Continuar assistindo" ? progressMap : undefined}
+              resume={r.title === "Continuar assistindo"}
             />
           ))
         )}

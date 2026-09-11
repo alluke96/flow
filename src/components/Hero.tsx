@@ -6,10 +6,13 @@ import { useRouter } from "next/navigation";
 import type { TitleSummary } from "@/types/catalog";
 import { bannerUrl } from "@/lib/api-client";
 import { metaLine } from "@/lib/format";
+import { useProfiles } from "@/context/profile-context";
 
 export function Hero({ title }: { title: TitleSummary }) {
   const router = useRouter();
+  const { getProgress } = useProfiles();
   const [unavailable, setUnavailable] = useState(false);
+  const hasProgress = Boolean(getProgress(title.id));
 
   function handlePlay() {
     if (title.disponivel === false) {
@@ -29,7 +32,7 @@ export function Hero({ title }: { title: TitleSummary }) {
         <p className="hero-desc">{title.sinopse}</p>
         <div className="hero-actions">
           <button className="btn-hero play" onClick={handlePlay}>
-            ▶ Assistir
+            ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
           </button>
           <Link href={`/title/${title.id}`} className="btn-hero info">
             ⓘ Detalhes
