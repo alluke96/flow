@@ -373,8 +373,17 @@ export function VideoPlayer({
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
-      const isFormControl = target ? ["BUTTON", "SELECT", "INPUT"].includes(target.tagName) : false;
-      if ((e.key === " " || e.code === "Space") && !isFormControl) {
+      const tag = target?.tagName;
+      const isFormControl = tag ? ["BUTTON", "SELECT", "INPUT"].includes(tag) : false;
+      // A barra de espaço sempre alterna play/pause, mesmo com um botão do
+      // player focado (ex: acabou de clicar em mudo/tela cheia/±10s) — só
+      // fica de fora quando o foco está de verdade num campo de formulário
+      // com uso próprio pra espaço (o <select> de velocidade, o slider de
+      // volume). Sem isso, apertar espaço depois de clicar em qualquer
+      // outro botão só reativava ELE de novo (comportamento nativo do
+      // navegador pra botão focado), nunca tocava/pausava o vídeo.
+      const isRealFormControl = tag === "SELECT" || tag === "INPUT";
+      if ((e.key === " " || e.code === "Space") && !isRealFormControl) {
         e.preventDefault();
         togglePlay();
         showOverlay();
