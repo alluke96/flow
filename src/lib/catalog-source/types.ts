@@ -59,4 +59,10 @@ export interface CatalogSource {
    * existir ou não tiver `capa.*` própria — a rota decide o fallback.
    */
   openSeasonImage(titleId: string, seasonNumero: number): Promise<OpenResult | null>;
+  /**
+   * Força o próximo `listCatalog`/`getTitle` a ignorar o cache em memória e
+   * reconsultar a fonte de verdade (ver botão de refresh no menu de
+   * perfil). Opcional porque a fonte mock não tem cache nenhum pra invalidar.
+   */
+  invalidate?(): void;
 }

@@ -32,6 +32,21 @@ export async function fetchCatalog(): Promise<CatalogResponse> {
   return data;
 }
 
+/**
+ * Refresh forçado (botão no menu de perfil): ignora tanto este cache do
+ * cliente quanto o cache de ~5min do índice do Drive no servidor (ver
+ * POST /api/catalog). Limpa também os títulos já vistos, já que um título
+ * pode ter ganhado episódios/ficado disponível desde a última busca.
+ */
+export async function refreshCatalog(): Promise<CatalogResponse> {
+  const res = await fetch("/api/catalog", { method: "POST" });
+  if (!res.ok) throw new Error("Falha ao atualizar catálogo");
+  const data: CatalogResponse = await res.json();
+  catalogCache = data;
+  titleCache.clear();
+  return data;
+}
+
 export async function fetchTitle(id: string): Promise<TitleDetail | null> {
   const res = await fetch(`/api/title/${encodeURIComponent(id)}`);
   if (res.status === 404) return null;

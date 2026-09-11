@@ -1,6 +1,6 @@
 import { getDriveClient } from "@/lib/drive/client";
 import { buildDriveIndex, type DriveIndex } from "@/lib/drive/scan";
-import { cached } from "@/lib/cache";
+import { cached, invalidateCached } from "@/lib/cache";
 import { nodeToWebStream, parseRangeHeader } from "@/lib/stream-utils";
 import type { CatalogSource, FileRange, OpenResult } from "./types";
 
@@ -44,6 +44,10 @@ async function fetchDriveRange(
 }
 
 export const driveCatalogSource: CatalogSource = {
+  invalidate() {
+    invalidateCached(CATALOG_CACHE_KEY);
+  },
+
   async listCatalog() {
     const index = await getIndex();
     return Array.from(index.values()).map((entry) => ({
