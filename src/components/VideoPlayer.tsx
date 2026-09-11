@@ -397,7 +397,11 @@ export function VideoPlayer({
         seekBy(10);
       } else if (e.key === "ArrowLeft" && !isFormControl) {
         seekBy(-10);
-      } else if (e.key === "Escape") {
+      } else if (e.key === "Escape" || e.keyCode === 10009) {
+        // 10009 = physical "Return"/back button on Samsung TV remotes
+        // (Tizen WebKit), not the same key as Escape — handled here too so
+        // the remote's back button exits the player directly, same as
+        // Escape does on a keyboard.
         onExit();
       }
     }
