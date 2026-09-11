@@ -21,6 +21,7 @@ import {
   NextEpisodeIcon,
   PauseIcon,
   PlayIcon,
+  ReplayIcon,
   VolumeHighIcon,
   VolumeLowIcon,
   VolumeMuteIcon,
@@ -45,6 +46,7 @@ interface WebkitVideoElement extends HTMLVideoElement {
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const OVERLAY_HIDE_MS = 3200;
 const DOUBLE_TAP_MS = 320;
+const NEXT_EPISODE_COUNTDOWN_S = 5;
 
 /**
  * Player customizado: controles próprios, gestos de toque (tap = play/pause,
@@ -91,6 +93,10 @@ export function VideoPlayer({
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<{ pct: number; time: number } | null>(null);
+  // null = sem contagem rolando (ainda não acabou, ou usuário cancelou).
+  // Enquanto tem próximo episódio, o fim do vídeo arma essa contagem em
+  // vez de já disparar onNextEpisode — dá pra cancelar e ficar aqui.
+  const [nextCountdown, setNextCountdown] = useState<number | null>(null);
 
   const src = streamUrl(titleId, episodeId);
 
@@ -403,9 +409,34 @@ export function VideoPlayer({
   function handleEnded() {
     setEnded(true);
     doSaveProgress();
-    if (onNextEpisode) {
-      setTimeout(() => onNextEpisode(), 1800);
+    if (onNextEpisode) setNextCountdown(NEXT_EPISODE_COUNTDOWN_S);
+  }
+
+  // Contagem regressiva pro próximo episódio: um segundo por vez, dispara
+  // onNextEpisode ao chegar em zero. Cancelar (ou dar replay) só zera o
+  // estado, o que já limpa esse efeito antes de rodar de novo.
+  useEffect(() => {
+    if (nextCountdown === null) return;
+    if (nextCountdown <= 0) {
+      onNextEpisode?.();
+      return;
     }
+    const t = setTimeout(() => setNextCountdown((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [nextCountdown, onNextEpisode]);
+
+  function cancelNextEpisode() {
+    setNextCountdown(null);
+  }
+
+  function handleReplay() {
+    const v = videoRef.current;
+    if (v) {
+      v.currentTime = 0;
+      v.play().catch(() => {});
+    }
+    setEnded(false);
+    setNextCountdown(null);
   }
 
   const pct = duration ? (currentTime / duration) * 100 : 0;
@@ -506,6 +537,10 @@ export function VideoPlayer({
             </button>
             {loading ? (
               <div className="spinner spinner-inline" />
+            ) : ended ? (
+              <button className="player-playpause" onClick={handleReplay} aria-label="Assistir de novo">
+                <ReplayIcon />
+              </button>
             ) : (
               <button
                 className="player-playpause"
@@ -601,29 +636,14 @@ export function VideoPlayer({
         </div>
       </div>
 
-      {ended && !onNextEpisode && (
-        <div className="modal-backdrop" style={{ position: "absolute" }}>
-          <div className="modal" style={{ textAlign: "center" }}>
-            <h2>Fim do vídeo</h2>
-            <div className="modal-actions" style={{ justifyContent: "center" }}>
-              <button className="btn btn-ghost" onClick={onExit}>
-                Voltar aos detalhes
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  const v = videoRef.current;
-                  if (v) {
-                    v.currentTime = 0;
-                    v.play().catch(() => {});
-                  }
-                  setEnded(false);
-                }}
-              >
-                Assistir de novo
-              </button>
-            </div>
-          </div>
+      {/* Canto inferior direito, discreto (não bloqueia nada por baixo —
+          diferente do antigo modal de "fim do vídeo", que cobria a tela
+          inteira e travava até o botão de voltar). Só aparece com próximo
+          episódio disponível; cancelar ou dar replay já limpa o estado. */}
+      {nextCountdown !== null && (
+        <div className="next-up-toast">
+          <span>Iniciando o próximo em {nextCountdown}…</span>
+          <button onClick={cancelNextEpisode}>Cancelar</button>
         </div>
       )}
     </div>

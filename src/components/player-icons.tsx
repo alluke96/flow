@@ -84,6 +84,15 @@ export function Forward10Icon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ReplayIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4.5V9h4.5" />
+    </svg>
+  );
+}
+
 export function NextEpisodeIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

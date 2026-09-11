@@ -1061,6 +1061,41 @@ a {
   width: 18px !important;
   height: 18px !important;
 }
+/* Aviso de "próximo episódio em N..." — canto inferior direito, discreto
+   e translúcido (estilo "Live Activity" da Apple), fora do caminho dos
+   controles em vez de bloquear a tela inteira num modal. */
+.next-up-toast {
+  position: absolute;
+  right: clamp(16px, 3vw, 40px);
+  bottom: 118px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px 11px 18px;
+  border-radius: 14px;
+  background: rgba(40, 40, 44, 0.55);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 13.5px;
+  color: var(--text);
+  animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.next-up-toast button {
+  min-width: 0;
+  min-height: 0;
+  padding: 7px 14px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background-color 0.15s;
+}
+.next-up-toast button:hover,
+.next-up-toast button:focus-visible {
+  background: rgba(255, 255, 255, 0.24);
+}
 
 /* ---------- Volume ---------- */
 .volume-control {
