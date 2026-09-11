@@ -6,7 +6,7 @@ import { TopNav } from "@/components/TopNav";
 import { Hero } from "@/components/Hero";
 import { Row } from "@/components/Row";
 import { useProfiles } from "@/context/profile-context";
-import { fetchCatalog } from "@/lib/api-client";
+import { fetchCatalog, getCachedCatalog } from "@/lib/api-client";
 import { matchesSearch } from "@/lib/search";
 import type { TitleSummary } from "@/types/catalog";
 
@@ -20,7 +20,11 @@ export default function BrowsePage() {
 
 function BrowseInner() {
   const { activeProfile } = useProfiles();
-  const [titles, setTitles] = useState<TitleSummary[] | null>(null);
+  // Se o catálogo já foi carregado nesta sessão (ex: voltando de um
+  // título), mostra na hora — a busca ainda roda em segundo plano.
+  const [titles, setTitles] = useState<TitleSummary[] | null>(
+    () => getCachedCatalog()?.titulos ?? null
+  );
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -29,7 +33,7 @@ function BrowseInner() {
       .then((data) => {
         if (active) setTitles(data.titulos);
       })
-      .catch(() => active && setTitles([]));
+      .catch(() => active && setTitles((prev) => prev ?? []));
     return () => {
       active = false;
     };

@@ -707,6 +707,11 @@ a {
 .player-overlay {
   position: absolute;
   inset: 0;
+  /* Reserva o espaço que o .player-top ocupa (agora fora daqui, numa camada
+     própria — ver comentário nele): sem isso, .player-center (flex:1)
+     cresce até o topo de verdade e a caixa dele fica por cima do botão de
+     voltar mesmo sem conteúdo visível ali, roubando o clique. */
+  padding-top: calc(84px + env(safe-area-inset-top));
   display: flex;
   flex-direction: column;
   justify-content: space-between;

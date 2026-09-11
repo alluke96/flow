@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { RequireProfile } from "@/components/RequireProfile";
 import { useProfiles } from "@/context/profile-context";
-import { fetchTitle, bannerUrl, seasonImageUrl } from "@/lib/api-client";
+import { fetchTitle, getCachedTitle, bannerUrl, seasonImageUrl } from "@/lib/api-client";
 import { metaLine } from "@/lib/format";
 import type { TitleDetail } from "@/types/catalog";
 
@@ -21,17 +21,30 @@ function TitleDetailInner() {
   const id = params.id;
   const router = useRouter();
   const { isInWatchlist, toggleWatchlist } = useProfiles();
-  const [title, setTitle] = useState<TitleDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Se o título já foi visto nesta sessão (ex: voltando do player), mostra
+  // na hora em vez de piscar uma tela de loading pra buscar algo que já
+  // temos — a busca ainda roda em segundo plano pra manter atualizado.
+  const [title, setTitle] = useState<TitleDetail | null>(() => getCachedTitle(id) ?? null);
+  const [loading, setLoading] = useState(() => !getCachedTitle(id));
   const [notFound, setNotFound] = useState(false);
   const [seasonIdx, setSeasonIdx] = useState(0);
 
   useEffect(() => {
     let active = true;
-    // reseta o estado de carregamento a cada troca de `id` (navegação entre títulos)
+    const cached = getCachedTitle(id);
+    // reseta estado dependente de `id` — se já está em cache, mostra na
+    // hora (sem piscar loading); senão pisca loading normalmente enquanto
+    // busca. Ambos os casos exigem sincronizar vários estados de uma vez.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    setNotFound(false);
+    setSeasonIdx(0);
+    if (cached) {
+      setTitle(cached);
+      setNotFound(false);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setNotFound(false);
+    }
     fetchTitle(id)
       .then((data) => {
         if (!active) return;
@@ -40,9 +53,10 @@ function TitleDetailInner() {
           return;
         }
         setTitle(data);
-        setSeasonIdx(0);
       })
-      .catch(() => active && setNotFound(true))
+      .catch(() => {
+        if (active && !cached) setNotFound(true);
+      })
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
