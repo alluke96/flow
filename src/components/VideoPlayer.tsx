@@ -1,9 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type TouchEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type PointerEvent,
+  type TouchEvent,
+} from "react";
 import { useProfiles } from "@/context/profile-context";
 import { streamUrl } from "@/lib/api-client";
 import { fmtTime } from "@/lib/format";
+import {
+  Back10Icon,
+  BackArrowIcon,
+  FullscreenEnterIcon,
+  FullscreenExitIcon,
+  Forward10Icon,
+  NextEpisodeIcon,
+  PauseIcon,
+  PlayIcon,
+  VolumeHighIcon,
+  VolumeLowIcon,
+  VolumeMuteIcon,
+} from "./player-icons";
 
 interface VideoPlayerProps {
   titleId: string;
@@ -14,7 +35,7 @@ interface VideoPlayerProps {
   onNextEpisode?: () => void;
 }
 
-const RATES = [1, 1.25, 1.5, 1.75, 2, 0.5, 0.75];
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const OVERLAY_HIDE_MS = 3200;
 const DOUBLE_TAP_MS = 320;
 
@@ -45,11 +66,21 @@ export function VideoPlayer({
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(false);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
+  // Começa mudo de propósito: navegadores só garantem autoplay se o vídeo
+  // iniciar sem som (política padrão desde Chrome/Safari/Firefox recentes).
+  // O usuário desmuta pelo próprio controle de volume — sem isso, o play()
+  // automático falha silenciosamente e o vídeo fica parado esperando um
+  // clique manual.
+  const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(1);
   const [rate, setRate] = useState(1);
   const [overlayHidden, setOverlayHidden] = useState(false);
   const [ended, setEnded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [playbackError, setPlaybackError] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [preview, setPreview] = useState<{ pct: number; time: number } | null>(null);
 
   const src = streamUrl(titleId, episodeId);
 
@@ -95,6 +126,16 @@ export function VideoPlayer({
     });
   }
 
+  function handleProgress() {
+    const v = videoRef.current;
+    if (!v || v.buffered.length === 0) return;
+    let end = 0;
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= v.currentTime) end = v.buffered.end(i);
+    }
+    setBufferedEnd(end);
+  }
+
   // salva progresso periodicamente enquanto toca, e ao sair/trocar de título
   useEffect(() => {
     const interval = setInterval(() => {
@@ -137,16 +178,25 @@ export function VideoPlayer({
 
   function handleProgressPointerDown(e: PointerEvent<HTMLDivElement>) {
     draggingRef.current = true;
+    setDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
-    seekToPct(pctFromClientX(e.clientX));
+    const pct = pctFromClientX(e.clientX);
+    seekToPct(pct);
+    if (duration) setPreview({ pct: Math.min(Math.max(0, pct), 1), time: pct * duration });
     showOverlay();
   }
   function handleProgressPointerMove(e: PointerEvent<HTMLDivElement>) {
-    if (!draggingRef.current) return;
-    seekToPct(pctFromClientX(e.clientX));
+    const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
+    if (duration) setPreview({ pct, time: pct * duration });
+    if (draggingRef.current) seekToPct(pct);
   }
   function handleProgressPointerUp() {
     draggingRef.current = false;
+    setDragging(false);
+    setPreview(null);
+  }
+  function handleProgressPointerLeave() {
+    if (!draggingRef.current) setPreview(null);
   }
   function handleProgressKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowRight") seekBy(5);
@@ -154,7 +204,9 @@ export function VideoPlayer({
   }
 
   function isControlTarget(el: EventTarget | null): boolean {
-    return el instanceof HTMLElement ? Boolean(el.closest("button, .progress-bar")) : false;
+    return el instanceof HTMLElement
+      ? Boolean(el.closest("button, .progress-bar, .volume-slider, .rate-select"))
+      : false;
   }
 
   function handleVideoAreaClick(e: React.MouseEvent) {
@@ -196,10 +248,24 @@ export function VideoPlayer({
     setMuted(v.muted);
   }
 
-  function cycleRate() {
+  function handleVolumeChange(e: ChangeEvent<HTMLInputElement>) {
     const v = videoRef.current;
     if (!v) return;
-    const next = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+    const value = parseFloat(e.target.value);
+    // iOS Safari ignora volume via JS (só o usuário controla pelos botões
+    // físicos) — o slider fica visível mas sem efeito lá, é limitação da
+    // plataforma, não bug nosso.
+    v.volume = value;
+    setVolume(value);
+    const shouldMute = value === 0;
+    v.muted = shouldMute;
+    setMuted(shouldMute);
+  }
+
+  function handleRateChange(e: ChangeEvent<HTMLSelectElement>) {
+    const v = videoRef.current;
+    if (!v) return;
+    const next = parseFloat(e.target.value);
     v.playbackRate = next;
     setRate(next);
   }
@@ -211,17 +277,26 @@ export function VideoPlayer({
     else document.exitFullscreen();
   }
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    function onFsChange() {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    }
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
-      const isButton = target?.tagName === "BUTTON";
-      if ((e.key === " " || e.code === "Space") && !isButton) {
+      const isFormControl = target ? ["BUTTON", "SELECT", "INPUT"].includes(target.tagName) : false;
+      if ((e.key === " " || e.code === "Space") && !isFormControl) {
         e.preventDefault();
         togglePlay();
         showOverlay();
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight" && !isFormControl) {
         seekBy(10);
-      } else if (e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowLeft" && !isFormControl) {
         seekBy(-10);
       } else if (e.key === "Escape") {
         onExit();
@@ -241,6 +316,8 @@ export function VideoPlayer({
   }
 
   const pct = duration ? (currentTime / duration) * 100 : 0;
+  const bufferedPct = duration ? (bufferedEnd / duration) * 100 : 0;
+  const VolumeIcon = muted || volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
 
   return (
     <div className="player-shell" onMouseMove={showOverlay}>
@@ -250,8 +327,10 @@ export function VideoPlayer({
         src={src}
         playsInline
         autoPlay
+        muted={muted}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onProgress={handleProgress}
         onPlay={() => {
           setPlaying(true);
           showOverlay();
@@ -266,47 +345,65 @@ export function VideoPlayer({
         onWaiting={() => setLoading(true)}
         onCanPlay={() => setLoading(false)}
         onPlaying={() => setLoading(false)}
+        onError={() => {
+          // navegador não conseguiu decodificar/abrir o arquivo (contêiner
+          // não suportado, ex: .mkv no Chrome/Safari, arquivo corrompido...)
+          // — para de girar o spinner pra sempre e avisa em vez de travar.
+          setLoading(false);
+          setPlaybackError(true);
+        }}
       />
-
-      {loading && (
-        <div className="center-loader">
-          <div className="spinner" />
-        </div>
-      )}
 
       <div className={`player-overlay${overlayHidden ? " hidden" : ""}`}>
         <div className="player-top">
-          <button onClick={onExit} aria-label="Voltar" style={{ fontSize: 24 }}>
-            ←
+          <button onClick={onExit} aria-label="Voltar">
+            <BackArrowIcon />
           </button>
           <div className="player-title">{displayTitle}</div>
         </div>
 
-        <div className="player-center">
-          <button onClick={() => seekBy(-10)} aria-label="Voltar 10 segundos">
-            ⏪
-          </button>
-          <button
-            className="player-playpause"
-            onClick={togglePlay}
-            aria-label={playing ? "Pausar" : "Reproduzir"}
-          >
-            {playing ? "❚❚" : "▶"}
-          </button>
-          <button onClick={() => seekBy(10)} aria-label="Avançar 10 segundos">
-            ⏩
-          </button>
-        </div>
+        {playbackError ? (
+          <div className="player-center">
+            <div className="player-error">
+              <p>Não foi possível reproduzir este vídeo.</p>
+              <p className="player-error-hint">
+                O formato do arquivo pode não ser compatível com o navegador (ex: .mkv não toca
+                em Chrome/Safari — prefira .mp4 com vídeo H.264 e áudio AAC).
+              </p>
+            </div>
+          </div>
+        ) : loading ? (
+          <div className="player-center">
+            <div className="spinner" />
+          </div>
+        ) : (
+          <div className="player-center">
+            <button onClick={() => seekBy(-10)} aria-label="Voltar 10 segundos">
+              <Back10Icon />
+            </button>
+            <button
+              className="player-playpause"
+              onClick={togglePlay}
+              aria-label={playing ? "Pausar" : "Reproduzir"}
+            >
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button onClick={() => seekBy(10)} aria-label="Avançar 10 segundos">
+              <Forward10Icon />
+            </button>
+          </div>
+        )}
 
         <div className="player-bottom">
           <div className="progress-row">
             <span className="time">{fmtTime(currentTime)}</span>
             <div
-              className="progress-bar"
+              className={`progress-bar${dragging ? " dragging" : ""}`}
               ref={progressRef}
               onPointerDown={handleProgressPointerDown}
               onPointerMove={handleProgressPointerMove}
               onPointerUp={handleProgressPointerUp}
+              onPointerLeave={handleProgressPointerLeave}
               onKeyDown={handleProgressKeyDown}
               role="slider"
               aria-label="Progresso do vídeo"
@@ -315,27 +412,63 @@ export function VideoPlayer({
               aria-valuenow={Math.round(pct)}
               tabIndex={0}
             >
-              <div className="progress-track" />
+              {preview && (
+                <div className="progress-tooltip" style={{ left: `${preview.pct * 100}%` }}>
+                  {fmtTime(preview.time)}
+                </div>
+              )}
+              <div className="progress-track">
+                <div className="progress-buffered" style={{ width: `${bufferedPct}%` }} />
+              </div>
               <div className="progress-fill" style={{ width: `${pct}%` }} />
               <div className="progress-handle" style={{ left: `${pct}%` }} />
             </div>
             <span className="time">{fmtTime(duration)}</span>
           </div>
           <div className="player-controls-row">
-            <button onClick={toggleMute} aria-label={muted ? "Ativar som" : "Silenciar"}>
-              {muted ? "🔇" : "🔊"}
-            </button>
-            <button className="rate-btn" onClick={cycleRate} aria-label="Velocidade de reprodução">
-              {rate}x
-            </button>
+            <div className="volume-control">
+              <button onClick={toggleMute} aria-label={muted ? "Ativar som" : "Silenciar"}>
+                <VolumeIcon />
+              </button>
+              <input
+                className="volume-slider"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={handleVolumeChange}
+                aria-label="Volume"
+              />
+            </div>
+
+            <div className="rate-select-wrap">
+              <select
+                className="rate-select"
+                value={rate}
+                onChange={handleRateChange}
+                aria-label="Velocidade de reprodução"
+              >
+                {RATES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}x
+                  </option>
+                ))}
+              </select>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </div>
+
             {onNextEpisode && (
-              <button onClick={onNextEpisode} aria-label="Próximo episódio">
-                Próximo ⏭
+              <button className="next-ep-btn" onClick={onNextEpisode} aria-label="Próximo episódio">
+                <span>Próximo</span>
+                <NextEpisodeIcon />
               </button>
             )}
             <div className="spacer" />
-            <button onClick={toggleFullscreen} aria-label="Tela cheia">
-              ⛶
+            <button onClick={toggleFullscreen} aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}>
+              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenEnterIcon />}
             </button>
           </div>
         </div>

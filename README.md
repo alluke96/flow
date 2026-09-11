@@ -80,11 +80,20 @@ Catálogo/
 - Pasta de filme/série = título exibido; `(2023)` no nome é opcional.
 - `Temporada NN` com dois dígitos.
 - Episódio: `NN - Nome do Episódio.{mp4,mkv,webm,mov,m4v,avi,mpeg,mpg,ts,m2ts}`
-  (dois dígitos + " - " + nome; o container pode ser qualquer um desses —
-  o navegador que decide se toca, o backend só precisa reconhecer o
-  arquivo). Evite nomes com **extensão dupla** (ex: `01 - Nome.mov.mkv`,
-  sobra de uma conversão antiga) — só a última extensão é removida do
-  título exibido, então a `.mov` do meio ficaria grudada no nome.
+  (dois dígitos + " - " + nome). O backend reconhece qualquer um desses como
+  vídeo e faz o proxy/streaming normalmente — **mas quem decide se toca é o
+  navegador**, não o app: `.mp4` (vídeo
+  H.264, áudio AAC) é o único formato com suporte garantido em
+  Chrome/Edge/Safari/Firefox. Em particular, **`.mkv` (Matroska) não toca
+  em Chrome nem Safari** mesmo que o vídeo/áudio internos sejam H.264/AAC —
+  o contêiner em si não é suportado nesses navegadores. Se o arquivo já é
+  H.264/AAC dentro de um `.mkv`, dá pra rempacotar pra `.mp4` sem perder
+  qualidade nem recodificar (rápido): `ffmpeg -i entrada.mkv -c copy
+  saida.mp4`. O player mostra um aviso na tela em vez de ficar carregando
+  pra sempre quando o navegador não consegue abrir o arquivo.
+  Evite nomes com **extensão dupla** (ex: `01 - Nome.mov.mkv`, sobra de uma
+  conversão antiga) — só a última extensão é removida do título exibido,
+  então a `.mov` do meio ficaria grudada no nome.
 - Pôster sempre `capa.{jpg,png,webp}`; banner sempre `banner.{jpg,png,webp}`.
 - **Capa por temporada** (opcional): um `capa.{jpg,png,webp}` dentro de
   `Temporada NN/`, junto dos episódios, vira a miniatura de *todos* os
