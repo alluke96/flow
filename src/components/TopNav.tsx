@@ -22,7 +22,7 @@ export function TopNav({ search, onSearchChange }: TopNavProps) {
   return (
     <nav className="topnav">
       <Link href="/browse" className="brand">
-        Flow
+        flow
       </Link>
       <div className="nav-right">
         <input

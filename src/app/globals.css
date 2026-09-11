@@ -311,9 +311,20 @@ a {
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent);
 }
 .brand {
-  font-size: 20px;
+  font-family: var(--font-brand), var(--font);
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.04em;
+  text-transform: lowercase;
+  display: inline-block;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.brand:hover,
+.brand:focus-visible {
+  opacity: 0.8;
+}
+.brand:active {
+  transform: scale(0.96);
 }
 .nav-right {
   display: flex;

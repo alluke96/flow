@@ -1,10 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
+import { Space_Grotesk } from "next/font/google";
 import { ProfileProvider } from "@/context/profile-context";
 import "./globals.css";
 
+// Só pro wordmark "flow" (ver .brand em globals.css) — o resto do app
+// continua na fonte de sistema. next/font baixa e hospeda o arquivo em
+// build time (fica em /_next/static, mesma origem), então não bate na CSP
+// nem faz request externo em runtime.
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  variable: "--font-brand",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Flow — Streaming",
+  title: "flow — streaming",
   description: "Catálogo de filmes e séries em streaming.",
 };
 
@@ -22,7 +34,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   await connection();
 
   return (
-    <html lang="pt-BR" className="h-full">
+    <html lang="pt-BR" className={`h-full ${spaceGrotesk.variable}`}>
       <body className="min-h-full">
         <ProfileProvider>{children}</ProfileProvider>
       </body>
