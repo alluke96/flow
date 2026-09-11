@@ -1,0 +1,96 @@
+[
+  {
+    "id": "t1",
+    "tipo": "filme",
+    "titulo": "Órbita Silenciosa",
+    "ano": 2024,
+    "genero": ["Ficção Científica"],
+    "duracaoMinutos": 118,
+    "classificacaoIndicativa": "14",
+    "sinopse": "Uma engenheira de bordo precisa decidir entre salvar a missão ou a tripulação quando a nave perde contato com a Terra.",
+    "elenco": ["Alma Reyes", "Kenji Osei"],
+    "diretor": "Marina Kessler"
+  },
+  {
+    "id": "t2",
+    "tipo": "filme",
+    "titulo": "A Última Colheita",
+    "ano": 2022,
+    "genero": ["Drama"],
+    "duracaoMinutos": 125,
+    "classificacaoIndicativa": "10",
+    "sinopse": "Três irmãos voltam à fazenda da família para decidir o futuro da terra antes da primeira geada do ano.",
+    "elenco": ["Luiza Bardot", "Tomás Ferreira"],
+    "diretor": "Heitor Nunes"
+  },
+  {
+    "id": "t3",
+    "tipo": "serie",
+    "titulo": "Linha de Sombra",
+    "ano": 2023,
+    "genero": ["Suspense"],
+    "classificacaoIndicativa": "16",
+    "sinopse": "Uma detetive recém-transferida encontra padrões impossíveis em uma cidade litorânea que guarda seus próprios segredos.",
+    "elenco": ["Renata Sousa", "Diego Malta"],
+    "temporadas": [
+      {
+        "numero": 1,
+        "episodios": [
+          { "numero": 1, "titulo": "A Chegada", "duracaoMinutos": 42 },
+          { "numero": 2, "titulo": "Maré Baixa", "duracaoMinutos": 39 },
+          { "numero": 3, "titulo": "O Farol", "duracaoMinutos": 45 }
+        ]
+      },
+      {
+        "numero": 2,
+        "episodios": [
+          { "numero": 1, "titulo": "Águas Paradas", "duracaoMinutos": 41 },
+          { "numero": 2, "titulo": "O Retorno", "duracaoMinutos": 44 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "t4",
+    "tipo": "serie",
+    "titulo": "Circuito",
+    "ano": 2021,
+    "genero": ["Ação"],
+    "classificacaoIndicativa": "14",
+    "sinopse": "Um grupo de ex-pilotos monta uma rede clandestina de corridas para pagar uma dívida que não é só deles.",
+    "elenco": ["Bianca Off", "Rafael Tude"],
+    "temporadas": [
+      {
+        "numero": 1,
+        "episodios": [
+          { "numero": 1, "titulo": "Largada", "duracaoMinutos": 37 },
+          { "numero": 2, "titulo": "Curva Cega", "duracaoMinutos": 40 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "t5",
+    "tipo": "filme",
+    "titulo": "Depois do Verão",
+    "ano": 2020,
+    "genero": ["Drama", "Romance"],
+    "duracaoMinutos": 107,
+    "classificacaoIndicativa": "12",
+    "sinopse": "Dois amigos de infância se reencontram numa cidade litorânea quase vazia fora de temporada.",
+    "elenco": ["Julia Reame", "Pedro Alcaide"],
+    "diretor": "Sofia Prado"
+  },
+  {
+    "id": "t6",
+    "tipo": "filme",
+    "titulo": "Ruído Branco",
+    "ano": 2024,
+    "genero": ["Terror"],
+    "duracaoMinutos": 92,
+    "classificacaoIndicativa": "16",
+    "sinopse": "Uma família se muda para uma casa isolada e começa a ouvir a própria voz vindo das paredes.",
+    "elenco": ["Estela Cunha"],
+    "diretor": "Caio Bezerra"
+  }
+]
