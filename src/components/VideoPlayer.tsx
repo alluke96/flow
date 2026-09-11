@@ -404,7 +404,10 @@ export function VideoPlayer({
   const VolumeIcon = muted || volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
 
   return (
-    <div className="player-shell" onMouseMove={showOverlay}>
+    <div
+      className={`player-shell${overlayHidden ? " controls-hidden" : ""}`}
+      onMouseMove={showOverlay}
+    >
       <video
         ref={videoRef}
         className="player-video"
@@ -454,11 +457,14 @@ export function VideoPlayer({
         }}
       />
 
-      {/* Fora da camada que soma opacidade/pointer-events com o resto dos
-          controles: sair do player precisa funcionar sempre, mesmo com o
-          overlay escondido por inatividade — não devia exigir um primeiro
-          toque só pra "acordar" os controles antes de conseguir voltar. */}
-      <div className="player-top">
+      {/* Fica fora da camada que soma opacity+pointer-events com o resto dos
+          controles (.player-overlay) — mas ainda assim SOME visualmente
+          junto com o resto por inatividade (classe "hidden" abaixo, só
+          opacity). A diferença é só que aqui pointer-events continua
+          "auto": sair do player precisa funcionar sempre, mesmo com os
+          controles escondidos — não devia exigir um primeiro toque só pra
+          "acordar" os controles antes de conseguir voltar. */}
+      <div className={`player-top${overlayHidden ? " hidden" : ""}`}>
         <button onClick={onExit} aria-label="Voltar">
           <BackArrowIcon />
         </button>

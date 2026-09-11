@@ -804,6 +804,16 @@ a {
   inset: 0;
   z-index: 200;
 }
+/* Em tela cheia de verdade (Fullscreen API — não o fullscreen nativo do
+   iOS, que usa o player do próprio SO e não passa por aqui), esconde o
+   cursor do mouse junto com os controles por inatividade — senão ele fica
+   parado no meio da tela sem nada visível ali embaixo pra justificar. Só
+   dentro de :fullscreen: fora dela o cursor precisa continuar visível pra
+   navegar o resto da página normalmente. */
+.player-shell.controls-hidden:fullscreen,
+.player-shell.controls-hidden:-webkit-full-screen {
+  cursor: none;
+}
 .player-video {
   width: 100%;
   height: 100%;
@@ -848,10 +858,17 @@ a {
   gap: 16px;
   padding: max(20px, env(safe-area-inset-top)) clamp(16px, 3vw, 40px) 32px;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
-  /* sempre visível/clicável — não soma opacity/pointer-events com
-     .player-overlay.hidden (ver comentário no componente); z-index alto +
-     isolation garantem que fica acima de qualquer overlay nativo do
-     navegador sobre o <video> (picture-in-picture, cast) também. */
+  opacity: 1;
+  transition: opacity 0.25s;
+  /* z-index alto + isolation garantem que fica acima de qualquer overlay
+     nativo do navegador sobre o <video> (picture-in-picture, cast). */
+}
+/* Some visualmente junto com o resto dos controles por inatividade — mas
+   sem pointer-events:none (ver comentário no componente): continua
+   clicável mesmo invisível, então "voltar" nunca fica preso atrás de um
+   primeiro toque só pra reexibir os controles. */
+.player-top.hidden {
+  opacity: 0;
 }
 .player-top button {
   position: relative;
