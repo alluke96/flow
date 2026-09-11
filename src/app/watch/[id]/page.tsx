@@ -80,8 +80,19 @@ function WatchInner() {
   let episode: (EpisodeSummary & { seasonNumero: number }) | undefined;
 
   if (title.tipo === "serie") {
-    if (episodeId) episode = allEpisodes.find((e) => e.id === episodeId);
-    if (!episode) {
+    if (episodeId) {
+      // Um episódio específico foi pedido na URL (ex: veio do avanço
+      // automático pro próximo, ou de um link direto) — confia nele. Cair
+      // pro fallback de "continuar assistindo"/primeiro episódio aqui seria
+      // errado: bastava esse id não resolver por um instante (ex: um
+      // re-render no meio da navegação) pra saltar de volta pro episódio 1
+      // da temporada 1 sem nenhum aviso, mesmo estando no meio de outro
+      // episódio qualquer.
+      episode = allEpisodes.find((e) => e.id === episodeId);
+    } else {
+      // Nenhum episódio pedido (ex: clicou em "Assistir" na tela do
+      // título) — aí sim faz sentido continuar de onde parou, ou começar
+      // do primeiro se nunca assistiu nada dessa série.
       const progress = getProgress(title.id);
       episode = allEpisodes.find((e) => e.id === progress?.episodioId) ?? allEpisodes[0];
       episodeId = episode?.id ?? null;
@@ -89,7 +100,11 @@ function WatchInner() {
     if (!episode) {
       return (
         <div className="player-shell" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <p>Esta série ainda não tem episódios.</p>
+          <p>
+            {searchParams.get("ep")
+              ? "Episódio não encontrado."
+              : "Esta série ainda não tem episódios."}
+          </p>
         </div>
       );
     }

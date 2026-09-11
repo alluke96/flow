@@ -412,18 +412,35 @@ export function VideoPlayer({
     if (onNextEpisode) setNextCountdown(NEXT_EPISODE_COUNTDOWN_S);
   }
 
-  // Contagem regressiva pro próximo episódio: um segundo por vez, dispara
-  // onNextEpisode ao chegar em zero. Cancelar (ou dar replay) só zera o
-  // estado, o que já limpa esse efeito antes de rodar de novo.
+  // onNextEpisode é uma função nova a cada render de WatchInner (closure
+  // inline) — troca de identidade sempre que aquele componente re-renderiza
+  // por qualquer motivo (ex: o próprio doSaveProgress mexendo no contexto de
+  // perfis). Se ela estivesse nas deps do efeito abaixo, cada uma dessas
+  // trocas reiniciaria o setTimeout de 1s do zero, e a contagem podia nunca
+  // chegar a disparar de verdade. Uma ref sempre aponta pra versão mais
+  // recente sem forçar o efeito a re-rodar por causa dela.
+  const onNextEpisodeRef = useRef(onNextEpisode);
+  useEffect(() => {
+    onNextEpisodeRef.current = onNextEpisode;
+  }, [onNextEpisode]);
+
+  // Contagem regressiva pro próximo episódio: um segundo por vez. O
+  // setState que zera o estado e dispara onNextEpisode acontece dentro do
+  // callback do setTimeout (assíncrono), nunca direto no corpo do efeito —
+  // evita disparar duas vezes e mantém só uma fonte de verdade pro "acabou
+  // a contagem". Cancelar (ou dar replay) também só zera esse estado.
   useEffect(() => {
     if (nextCountdown === null) return;
-    if (nextCountdown <= 0) {
-      onNextEpisode?.();
-      return;
-    }
-    const t = setTimeout(() => setNextCountdown((n) => (n === null ? null : n - 1)), 1000);
+    const t = setTimeout(() => {
+      if (nextCountdown <= 1) {
+        setNextCountdown(null);
+        onNextEpisodeRef.current?.();
+      } else {
+        setNextCountdown(nextCountdown - 1);
+      }
+    }, 1000);
     return () => clearTimeout(t);
-  }, [nextCountdown, onNextEpisode]);
+  }, [nextCountdown]);
 
   function cancelNextEpisode() {
     setNextCountdown(null);
