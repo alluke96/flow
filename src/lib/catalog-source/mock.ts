@@ -130,4 +130,25 @@ export const mockCatalogSource: CatalogSource = {
     };
     return result;
   },
+
+  async openSeasonImage(titleId, seasonNumero) {
+    const raw = findRaw(titleId);
+    if (!raw) return null;
+    const exists = raw.temporadas?.some((s) => s.numero === seasonNumero);
+    if (!exists) return null;
+    // Mock não tem arte por temporada — reaproveita o banner do título
+    // (mock.ts só existe pra dar layout de exemplo, não pra ser fiel aqui).
+    const buf = readPublicAsset(`mock/banners/${titleId}.svg`);
+    if (!buf) return null;
+    const result: OpenResult = {
+      kind: "stream",
+      status: 200,
+      contentType: "image/svg+xml",
+      contentLength: buf.byteLength,
+      totalSize: buf.byteLength,
+      range: null,
+      body: bufferToStream(new Uint8Array(buf)),
+    };
+    return result;
+  },
 };

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { RequireProfile } from "@/components/RequireProfile";
 import { useProfiles } from "@/context/profile-context";
-import { fetchTitle, bannerUrl } from "@/lib/api-client";
+import { fetchTitle, bannerUrl, seasonImageUrl } from "@/lib/api-client";
 import { metaLine } from "@/lib/format";
 import type { TitleDetail } from "@/types/catalog";
 
@@ -123,7 +123,19 @@ function TitleDetailInner() {
                 >
                   <div className="ep-num">{i + 1}</div>
                   <div className="ep-thumb">
-                    <img src={bannerUrl(title.id)} alt="" loading="lazy" />
+                    <img
+                      src={season ? seasonImageUrl(title.id, season.numero) : bannerUrl(title.id)}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        // temporada sem capa.jpg própria -> cai pro banner do título
+                        // (guarda por dataset pra não entrar em loop se o banner também falhar)
+                        const img = e.currentTarget;
+                        if (img.dataset.fallback) return;
+                        img.dataset.fallback = "1";
+                        img.src = bannerUrl(title.id);
+                      }}
+                    />
                   </div>
                   <div className="ep-info">
                     <div className="ep-title">{ep.titulo}</div>

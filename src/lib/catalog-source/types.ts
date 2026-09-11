@@ -53,4 +53,10 @@ export interface CatalogSource {
     rangeHeader: string | null
   ): Promise<OpenResult | null>;
   openImage(titleId: string, kind: ImageKind): Promise<OpenResult | null>;
+  /**
+   * Capa de uma temporada específica (usada como miniatura repetida em
+   * todos os episódios daquela temporada). Retorna null se a temporada não
+   * existir ou não tiver `capa.*` própria — a rota decide o fallback.
+   */
+  openSeasonImage(titleId: string, seasonNumero: number): Promise<OpenResult | null>;
 }

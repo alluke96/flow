@@ -14,6 +14,7 @@ const idPattern = /^[A-Za-z0-9_-]{1,200}$/;
 export const titleIdSchema = z.string().regex(idPattern, "id de título inválido");
 export const episodeIdSchema = z.string().regex(idPattern, "id de episódio inválido");
 export const imageKindSchema = z.enum(["poster", "banner"]);
+export const seasonNumberSchema = z.coerce.number().int().positive().max(1000);
 
 export const profileNameSchema = z
   .string()

@@ -67,19 +67,31 @@ Catálogo/
 └── Nome da Série/
     ├── capa.jpg
     ├── banner.jpg
-    ├── info.json
+    ├── info.json            → também vale pra série (mesmo formato)
     ├── Temporada 01/
+    │   ├── capa.jpg         → opcional: miniatura dos episódios dessa temporada
     │   ├── 01 - Nome do Episódio.mp4
     │   └── 02 - Nome do Episódio.mp4
     └── Temporada 02/
+        ├── capa.jpg
         └── 01 - Nome do Episódio.mp4
 ```
 
 - Pasta de filme/série = título exibido; `(2023)` no nome é opcional.
 - `Temporada NN` com dois dígitos.
-- Episódio: `NN - Nome do Episódio.mp4` (dois dígitos + " - " + nome).
+- Episódio: `NN - Nome do Episódio.{mp4,mkv,webm,mov,m4v,avi,mpeg,mpg,ts,m2ts}`
+  (dois dígitos + " - " + nome; o container pode ser qualquer um desses —
+  o navegador que decide se toca, o backend só precisa reconhecer o
+  arquivo). Evite nomes com **extensão dupla** (ex: `01 - Nome.mov.mkv`,
+  sobra de uma conversão antiga) — só a última extensão é removida do
+  título exibido, então a `.mov` do meio ficaria grudada no nome.
 - Pôster sempre `capa.{jpg,png,webp}`; banner sempre `banner.{jpg,png,webp}`.
-- `info.json` (opcional) sobrescreve os metadados parseados do nome da pasta:
+- **Capa por temporada** (opcional): um `capa.{jpg,png,webp}` dentro de
+  `Temporada NN/`, junto dos episódios, vira a miniatura de *todos* os
+  episódios daquela temporada na tela de detalhe (repetida). Sem esse
+  arquivo, a miniatura cai de volta pro banner do título.
+- `info.json` (opcional, filme ou série) sobrescreve os metadados parseados
+  do nome da pasta:
 
   ```json
   {
@@ -113,6 +125,7 @@ src/
       catalog/                GET → lista de títulos
       title/[id]/              GET → detalhe de um título
       image/[id]/[kind]/        GET → pôster/banner (proxy, nunca link direto do Drive)
+      image/[id]/season/[n]/     GET → capa da temporada n (fallback: banner do título)
       stream/[id]/              GET → vídeo (proxy com Range Requests reais)
   lib/
     catalog-source/           contrato único (mock ⇄ Drive) — ver abaixo

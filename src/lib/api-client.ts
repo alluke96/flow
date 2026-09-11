@@ -27,6 +27,10 @@ export function bannerUrl(id: string): string {
   return `/api/image/${encodeURIComponent(id)}/banner`;
 }
 
+export function seasonImageUrl(id: string, seasonNumero: number): string {
+  return `/api/image/${encodeURIComponent(id)}/season/${seasonNumero}`;
+}
+
 export function streamUrl(id: string, episodeId?: string | null): string {
   const base = `/api/stream/${encodeURIComponent(id)}`;
   return episodeId ? `${base}?ep=${encodeURIComponent(episodeId)}` : base;

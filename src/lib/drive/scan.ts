@@ -20,7 +20,11 @@ const SEASON_RE = /^temporada\s+0*(\d+)/i;
 const EPISODE_RE = /^0*(\d+)\s*[-–—]\s*(.+)$/;
 const YEAR_RE = /\((\d{4})\)\s*$/;
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i;
-const VIDEO_EXT_RE = /\.(mp4|mkv|webm|mov|m4v)$/i;
+// Formatos de vídeo aceitos. mkv/mpeg/mpg/avi/ts cobrem a maioria dos
+// arquivos "crus" que não passaram por conversão pro mp4 padrão da web —
+// o navegador decide se consegue tocar, o backend só precisa reconhecer o
+// arquivo como episódio/filme.
+const VIDEO_EXT_RE = /\.(mp4|mkv|webm|mov|m4v|avi|mpe?g|ts|m2ts)$/i;
 
 interface DriveEpisodeEntry {
   id: string;
@@ -34,6 +38,9 @@ interface DriveEpisodeEntry {
 interface DriveSeasonEntry {
   numero: number;
   episodios: DriveEpisodeEntry[];
+  posterFileId?: string;
+  posterMime?: string;
+  posterSize?: number;
 }
 
 export interface DriveIndexEntry {
@@ -155,8 +162,14 @@ async function scanTitleFolder(
     for (const seasonFolder of seasonFolders) {
       const seasonMatch = SEASON_RE.exec(seasonFolder.name);
       const numero = seasonMatch ? parseInt(seasonMatch[1], 10) : seasons.length + 1;
-      const episodeFiles = await listChildren(drive, seasonFolder.id);
-      const episodios: DriveEpisodeEntry[] = episodeFiles
+      // Arquivos ficam juntos na pasta da temporada: episódios (vídeo) e,
+      // opcionalmente, uma "capa.jpg" pra ser a miniatura de todos os
+      // episódios daquela temporada (repetida — ver src/lib/catalog-source).
+      const seasonFiles = await listChildren(drive, seasonFolder.id);
+      const seasonPosterFile = seasonFiles.find(
+        (f) => /^capa\./i.test(f.name) && IMAGE_EXT_RE.test(f.name)
+      );
+      const episodios: DriveEpisodeEntry[] = seasonFiles
         .filter((f) => VIDEO_EXT_RE.test(f.name))
         .map((f) => {
           const match = EPISODE_RE.exec(f.name.replace(VIDEO_EXT_RE, ""));
@@ -172,7 +185,13 @@ async function scanTitleFolder(
           };
         })
         .sort((a, b) => a.numero - b.numero);
-      seasons.push({ numero, episodios });
+      seasons.push({
+        numero,
+        episodios,
+        posterFileId: seasonPosterFile?.id,
+        posterMime: seasonPosterFile?.mimeType,
+        posterSize: seasonPosterFile?.size ? parseInt(seasonPosterFile.size, 10) : undefined,
+      });
     }
     seasons.sort((a, b) => a.numero - b.numero);
     entry.seasons = seasons;

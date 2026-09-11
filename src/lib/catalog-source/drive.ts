@@ -97,4 +97,20 @@ export const driveCatalogSource: CatalogSource = {
 
     return fetchDriveRange(fileId, mime ?? "image/jpeg", size ?? 0, null);
   },
+
+  async openSeasonImage(titleId, seasonNumero) {
+    const index = await getIndex();
+    const entry = index.get(titleId);
+    if (!entry) return null;
+
+    const season = entry.seasons?.find((s) => s.numero === seasonNumero);
+    if (!season?.posterFileId) return null;
+
+    return fetchDriveRange(
+      season.posterFileId,
+      season.posterMime ?? "image/jpeg",
+      season.posterSize ?? 0,
+      null
+    );
+  },
 };
