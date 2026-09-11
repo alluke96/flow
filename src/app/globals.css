@@ -760,6 +760,11 @@ a {
 .player-title {
   font-size: 15px;
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .player-center {
   flex: 1;

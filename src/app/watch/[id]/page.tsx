@@ -99,7 +99,9 @@ function WatchInner() {
 
   const progress = getProgress(title.id);
   const initialTime = progress && progress.episodioId === episodeId ? progress.progressoSegundos : 0;
-  const displayTitle = episode ? `${title.titulo} — ${episode.titulo}` : title.titulo;
+  const displayTitle = episode
+    ? `${title.titulo} — T${episode.seasonNumero}:E${episode.numero} — ${episode.titulo}`
+    : title.titulo;
 
   let nextEpisode: (EpisodeSummary & { seasonNumero: number }) | undefined;
   if (episode) {
