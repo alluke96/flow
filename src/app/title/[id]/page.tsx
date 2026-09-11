@@ -114,7 +114,7 @@ function TitleDetailInner() {
                 </button>
               ))}
             </div>
-            <div>
+            <div key={seasonIdx} className="episode-list">
               {season?.episodios.map((ep, i) => (
                 <button
                   key={ep.id}

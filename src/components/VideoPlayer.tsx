@@ -350,6 +350,9 @@ export function VideoPlayer({
         playsInline
         autoPlay
         muted={muted}
+        disablePictureInPicture
+        disableRemotePlayback
+        controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onProgress={handleProgress}
