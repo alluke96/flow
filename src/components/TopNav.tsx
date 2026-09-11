@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProfiles } from "@/context/profile-context";
@@ -13,6 +14,18 @@ interface TopNavProps {
 export function TopNav({ search, onSearchChange }: TopNavProps) {
   const { activeProfile, exitProfile } = useProfiles();
   const router = useRouter();
+  const [solid, setSolid] = useState(false);
+
+  // Header fica transparente sobre o banner até rolar um pouco a página —
+  // depois disso fica sólido pra continuar legível por cima das fileiras.
+  useEffect(() => {
+    function onScroll() {
+      setSolid(window.scrollY > 10);
+    }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   function switchProfile() {
     exitProfile();
@@ -20,7 +33,7 @@ export function TopNav({ search, onSearchChange }: TopNavProps) {
   }
 
   return (
-    <nav className="topnav">
+    <nav className={`topnav${solid ? " solid" : ""}`}>
       <Link href="/browse" className="brand">
         flow
       </Link>

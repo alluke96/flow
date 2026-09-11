@@ -301,14 +301,24 @@ a {
 
 /* ---------- Top nav ---------- */
 .topnav {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 18px clamp(16px, 4vw, 48px);
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent);
+  transition: background-color 0.2s, backdrop-filter 0.2s;
+}
+/* depois de rolar um pouco a página, fica sólida pra continuar legível por
+   cima das fileiras (que não têm imagem de fundo pra combinar com o
+   degradê transparente) */
+.topnav.solid {
+  background: rgba(10, 10, 11, 0.92);
+  backdrop-filter: blur(10px);
 }
 .brand {
   font-family: var(--font-brand), var(--font);
@@ -370,6 +380,11 @@ a {
   background-size: cover;
   background-position: center;
 }
+/* camada de baixo: a imagem anterior, parada em opacidade 1 — some quando
+   a de cima termina de entrar, dando o efeito de crossfade entre slides */
+.hero-bg-current {
+  animation: fade-in 0.8s ease both;
+}
 .hero-fade {
   position: absolute;
   inset: 0;
@@ -385,9 +400,6 @@ a {
   padding: 0 clamp(16px, 4vw, 48px) 48px;
   max-width: 640px;
   animation: fade-in-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.hero-bg {
-  animation: fade-in 0.7s ease both;
 }
 .hero-title {
   font-size: clamp(32px, 5.5vw, 64px);

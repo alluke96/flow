@@ -70,6 +70,14 @@ function BrowseInner() {
   const filmes = useMemo(() => (titles ?? []).filter((t) => t.tipo === "filme"), [titles]);
   const series = useMemo(() => (titles ?? []).filter((t) => t.tipo === "serie"), [titles]);
 
+  // Carrossel do hero: até 5 títulos disponíveis (filmes e séries), na
+  // mesma ordem do catálogo (mais recentes primeiro), em vez de só o
+  // último adicionado fixo.
+  const heroTitles = useMemo(
+    () => (titles ?? []).filter((t) => t.disponivel !== false).slice(0, 5),
+    [titles]
+  );
+
   if (!titles) {
     return (
       <div className="center-loader" style={{ position: "fixed", inset: 0 }}>
@@ -82,7 +90,6 @@ function BrowseInner() {
   const filterList = (list: TitleSummary[]) =>
     q ? list.filter((t) => matchesSearch(t.titulo, q)) : list;
 
-  const hero = titles[0];
   const rows = [
     { title: "Continuar assistindo", items: filterList(continuando) },
     { title: "Minha lista", items: filterList(minhaLista) },
@@ -94,7 +101,7 @@ function BrowseInner() {
   return (
     <div>
       <TopNav search={search} onSearchChange={setSearch} />
-      {!q && hero && <Hero title={hero} />}
+      {!q && heroTitles.length > 0 && <Hero titles={heroTitles} />}
       <div className="rows">
         {q && !anyResults ? (
           <p className="search-empty">Nenhum título encontrado para &ldquo;{search}&rdquo;.</p>
