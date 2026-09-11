@@ -104,7 +104,7 @@ function TitleDetailInner() {
     <div>
       <div className="detail-banner">
         <button className="back-btn" onClick={() => router.push("/browse")} aria-label="Voltar">
-          ←
+          <span>←</span>
         </button>
         <div className="detail-banner-bg" style={{ backgroundImage: `url('${bannerUrl(title.id)}')` }} />
         <div className="detail-banner-fade" />
