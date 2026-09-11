@@ -7,6 +7,7 @@ import { Hero } from "@/components/Hero";
 import { Row } from "@/components/Row";
 import { useProfiles } from "@/context/profile-context";
 import { fetchCatalog } from "@/lib/api-client";
+import { matchesSearch } from "@/lib/search";
 import type { TitleSummary } from "@/types/catalog";
 
 export default function BrowsePage() {
@@ -73,9 +74,9 @@ function BrowseInner() {
     );
   }
 
-  const q = search.trim().toLowerCase();
+  const q = search.trim();
   const filterList = (list: TitleSummary[]) =>
-    q ? list.filter((t) => t.titulo.toLowerCase().includes(q)) : list;
+    q ? list.filter((t) => matchesSearch(t.titulo, q)) : list;
 
   const hero = titles[0];
   const rows = [
