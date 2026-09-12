@@ -28,9 +28,20 @@ const EVENTOS = [
 function descreverAlvo(el: EventTarget | null): string {
   if (!(el instanceof Element)) return String(el);
   const tag = el.tagName.toLowerCase();
-  const label = el.getAttribute("aria-label");
+  // O alvo de um clique num botão de ícone quase sempre é o <svg>/<path>
+  // do desenho, não o <button> em si — e SVG não tem className string
+  // (é um SVGAnimatedString), então sem isto toda entrada de ícone
+  // aparecia só como "svg", indistinguível entre ±10s, play/pause,
+  // voltar, tela cheia... closest("[aria-label]") sobe até achar o
+  // botão de verdade por trás do desenho.
+  const comLabel = el.closest("[aria-label]");
+  const label = comLabel?.getAttribute("aria-label");
+  if (label) {
+    const tagLabel = comLabel!.tagName.toLowerCase();
+    return tagLabel === tag ? `${tag}[${label}]` : `${tag}→${tagLabel}[${label}]`;
+  }
   const cls = typeof el.className === "string" ? el.className.split(" ")[0] : "";
-  return label ? `${tag}[${label}]` : cls ? `${tag}.${cls}` : tag;
+  return cls ? `${tag}.${cls}` : tag;
 }
 
 /**
@@ -48,6 +59,7 @@ function descreverAlvo(el: EventTarget | null): string {
 export function DebugOverlay() {
   const [on, setOn] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [videoInfo, setVideoInfo] = useState<string | null>(null);
   const idRef = useRef(0);
   const t0Ref = useRef(0);
 
@@ -57,6 +69,28 @@ export function DebugOverlay() {
     window.addEventListener(EVENTO_MUDANCA, sync);
     return () => window.removeEventListener(EVENTO_MUDANCA, sync);
   }, []);
+
+  // Estado do <video> ao vivo. Existe pra não depender de perguntar "o
+  // número mudou?" depois — a foto do overlay já mostra a resposta: se
+  // currentTime pula ao apertar ±10s, mesmo que a imagem do vídeo pareça
+  // travada (rebuffer), o clique funcionou e o problema é outro (rede/
+  // decodificação); se currentTime NÃO muda, o clique não chegou a
+  // executar seekBy de verdade, apesar do :active "apertar" na tela.
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => {
+      const v = document.querySelector("video");
+      if (!v) {
+        setVideoInfo(null);
+        return;
+      }
+      setVideoInfo(
+        `t=${v.currentTime.toFixed(1)}/${v.duration ? v.duration.toFixed(1) : "?"}` +
+          ` seeking=${v.seeking} paused=${v.paused} readyState=${v.readyState}`
+      );
+    }, 300);
+    return () => clearInterval(t);
+  }, [on]);
 
   useEffect(() => {
     if (!on) return;
@@ -101,6 +135,11 @@ export function DebugOverlay() {
       <div style={{ color: "#fff", marginBottom: 4 }}>
         DEBUG — toque 5x na versão pra desligar
       </div>
+      {videoInfo && (
+        <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all" }}>
+          vídeo: {videoInfo}
+        </div>
+      )}
       {log.length === 0 && <div style={{ color: "#888" }}>aguardando toque/clique/tecla…</div>}
       {log.map((e) => (
         <div key={e.id}>
