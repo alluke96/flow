@@ -1,27 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://flow.local/Flow" version="1.0.0" viewmodes="maximized">
+<!--
+  ESTE ARQUIVO É REFERÊNCIA, NÃO É PRA COPIAR POR CIMA DO SEU.
 
-    <!-- IMPORTANTE: se você JÁ criou o projeto no Tizen Studio, mantenha o
-         `id` e o `package` que ele gerou (linha <tizen:application> abaixo).
-         Trocar esses valores cria um app SEPARADO na TV em vez de atualizar
-         o que já está instalado. O resto do arquivo pode copiar à vontade. -->
-    <tizen:application id="FlowApp01.Flow" package="FlowApp01" required_version="2.4"/>
+  É o config.xml que o Tizen Studio gera pro template TV + Web Application,
+  que já funciona como está. A casca do Flow não precisa de NENHUMA linha a
+  mais: o acesso de rede ao PC já funciona sem <access>, e declarar
+  privilege de internet ou features de tela que o perfil tv-samsung não
+  conhece só faz o validador recusar o projeto na hora do launch.
 
+  Do app de TV, o único arquivo que você troca é o index.html.
+
+  O `id` e o `package` abaixo são de exemplo: o Tizen Studio gera os seus
+  na criação do projeto. Trocar esses valores instala um app SEPARADO na TV
+  em vez de atualizar o que já está lá.
+-->
+<widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://yourdomain/flow" version="0.2.1" viewmodes="maximized">
+    <tizen:application id="Pnz6w3CQfO.flow" package="Pnz6w3CQfO" required_version="2.3"/>
     <content src="index.html"/>
-    <name>Flow</name>
+    <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
     <icon src="icon.png"/>
-
-    <!-- Sem isto o app não consegue abrir o endereço do PC. O `origin="*"`
-         é necessário porque o destino é um IP da LAN, não um domínio fixo. -->
-    <access origin="*" subdomains="true"/>
-    <tizen:privilege name="http://tizen.org/privilege/internet"/>
-
+    <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="true"/>
+    <tizen:metadata key="http://tizen.org/metadata/app_ui_type/base_screen_resolution" value="extensive"/>
+    <!-- Sozinha esta linha não resolveu o ponteiro (a página tinha saído pro
+         contexto de navegador via location.replace). Mantida porque agora,
+         com o conteúdo dentro de um iframe, o documento de cima volta a ser
+         o app e a configuração passa a valer sobre ele. -->
+    <tizen:metadata key="http://samsung.com/tv/metadata/use.pointer.mode" value="false"/>
+    <name>flow</name>
+    <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
     <tizen:profile name="tv-samsung"/>
-    <feature name="http://tizen.org/feature/screen.size.all"/>
-
-    <!-- hwkey-event="enable" é o que faz o botão Return físico do controle
-         chegar como keydown (keyCode 10009) em vez de fechar o app na hora.
-         O tv-nav do Flow já trata esse código (ver src/lib/tv-nav.ts). -->
-    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
-
+    <!-- hwkey-event="enable": faz o botão Return físico chegar como keydown
+         (keyCode 10009), que o tv-nav já trata (ver src/lib/tv-nav.ts). -->
+    <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
 </widget>

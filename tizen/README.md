@@ -25,9 +25,11 @@ não manda mais `X-Frame-Options`.
 
 1. Tizen Studio → File → New → Tizen Project → Template → TV → Web
    Application → Basic Project
-2. Copie `index.html` e `config.xml` daqui por cima dos gerados.
-   **Mantenha o `<tizen:application id=... package=...>` que o Tizen Studio
-   criou** — trocar isso instala um app separado em vez de atualizar.
+2. Copie **apenas o `index.html`** daqui por cima do gerado. O `config.xml`
+   do template já funciona como está — o `config.xml` daqui é referência,
+   não é pra copiar: declarar privilege de internet, `<access>` ou features
+   de tela que o perfil `tv-samsung` não conhece faz o validador recusar o
+   projeto e o launch nem começa.
 3. Ajuste `URL_FLOW` no topo do `index.html` pro IP do PC.
 4. Coloque um `icon.png` (512x423 é o tamanho que a Samsung usa).
 5. Certificado: Certificate Manager → `+` → **Samsung** → **TV** (precisa da
