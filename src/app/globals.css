@@ -208,9 +208,14 @@ a {
    informação que o usuário final precisa notar. */
 .profiles-version {
   margin-top: 6px;
+  padding: 10px;
   font-size: 10px;
   color: var(--text-faint);
   opacity: 0.4;
+  /* área maior que o texto em si — é o gatilho oculto do overlay de
+     diagnóstico (5 toques, ver ProfileScreen.tsx), precisa ser fácil de
+     acertar repetidas vezes */
+  cursor: pointer;
 }
 .profile-card.managing .profile-avatar-btn {
   border-color: var(--accent-2);

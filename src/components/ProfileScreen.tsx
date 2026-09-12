@@ -1,13 +1,20 @@
 "use client";
 
-import { useState, type SVGProps } from "react";
+import { useRef, useState, type SVGProps } from "react";
 import { useRouter } from "next/navigation";
 import { useProfiles } from "@/context/profile-context";
 import { avatarSrc } from "@/lib/avatars";
 import { refreshCatalog } from "@/lib/api-client";
+import { isDebugEnabled, setDebugEnabled } from "@/lib/debug-log";
 import { ProfileModal } from "./ProfileModal";
 import type { Profile } from "@/types/profile";
 import pkg from "../../package.json";
+
+// 5 toques no número da versão em menos de 3s liga/desliga o overlay de
+// diagnóstico (ver DebugOverlay.tsx) — não tem DevTools na TV pra abrir do
+// jeito normal, então o gatilho precisa caber num toque de controle remoto.
+const TOQUES_PRA_ATIVAR = 5;
+const JANELA_TOQUES_MS = 3000;
 
 function RefreshIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -36,6 +43,21 @@ export function ProfileScreen() {
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
   const [creating, setCreating] = useState(false);
+  const tapsRef = useRef<{ n: number; primeiro: number }>({ n: 0, primeiro: 0 });
+
+  function handleVersionTap() {
+    const agora = Date.now();
+    const janela = tapsRef.current;
+    if (agora - janela.primeiro > JANELA_TOQUES_MS) {
+      tapsRef.current = { n: 1, primeiro: agora };
+      return;
+    }
+    janela.n += 1;
+    if (janela.n >= TOQUES_PRA_ATIVAR) {
+      tapsRef.current = { n: 0, primeiro: 0 };
+      setDebugEnabled(!isDebugEnabled());
+    }
+  }
   const [refreshState, setRefreshState] = useState<RefreshState>("idle");
   const router = useRouter();
 
@@ -124,7 +146,9 @@ export function ProfileScreen() {
           </button>
         )}
         <p className="profiles-note">Os perfis ficam salvos no servidor — os mesmos em todos os aparelhos.</p>
-        <p className="profiles-version">v{pkg.version}</p>
+        <p className="profiles-version" onClick={handleVersionTap}>
+          v{pkg.version}
+        </p>
       </div>
 
       {creating && (
