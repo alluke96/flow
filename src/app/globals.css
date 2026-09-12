@@ -929,14 +929,20 @@ a {
 }
 .player-center button {
   opacity: 0.9;
-  padding: 12px;
+  /* Alvo de toque maior nos botões de ±10s (antes: padding 12 + ícone
+     30 = ~54px). Num controle de TV apontando de longe, uma área de
+     acerto pequena é fácil de "quase acertar" e nada acontecer — subir
+     pra ~68px (perto do play/pause, 68px) dá bem mais folga sem carimbar
+     visualmente maior que o botão principal (o ícone deles continua 8px
+     menor que o do play/pause, mantendo a hierarquia). */
+  padding: 16px;
   border-radius: 50%;
   pointer-events: auto;
   transition: opacity 0.15s, background-color 0.15s, transform 0.1s;
 }
 .player-center button svg {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   display: block;
 }
 .player-center button:hover,
