@@ -36,10 +36,14 @@ import {
  * roda só localmente, sem login de verdade, guardar num arquivo do próprio
  * servidor sem autenticação é uma troca aceitável (ver comentário na rota).
  *
- * `perfilAtivoId` (qual perfil ESTE navegador tem selecionado agora)
- * continua em localStorage de propósito — é por dispositivo, não
- * compartilhado: trocar de perfil na TV não deveria mudar o que está ativo
- * no celular de quem também estiver usando o app ao mesmo tempo.
+ * `activeId` (qual perfil ESTE navegador tem selecionado agora) mora só em
+ * estado do React, de propósito — sem persistir em lugar nenhum. Continua
+ * valendo entre páginas dentro da MESMA sessão (o Provider não desmonta ao
+ * navegar dentro do app), mas some ao abrir o site de novo (aba nova,
+ * recarregar, fechar e abrir): "Quem está assistindo?" pergunta sempre no
+ * início, como no Netflix de verdade — sem isso, quem sempre usa o mesmo
+ * perfil no mesmo aparelho nunca via essa tela de novo depois da primeira
+ * vez, e era exatamente isso que o produto queria evitar.
  *
  * Toda mutação (criar/editar/excluir perfil, watchlist, progresso) atualiza
  * o estado local na hora (otimista, pra UI continuar instantânea como
@@ -47,31 +51,10 @@ import {
  * lista que ele devolve — que é a fonte da verdade de verdade.
  */
 
-const ACTIVE_ID_KEY = "flow_active_profile_id_v1";
 // Chave antiga (versão só-localStorage) — usada uma única vez pra migrar
 // perfis que já existiam neste navegador antes desta mudança, pra ninguém
 // perder o que já tinha criado (ver loadLegacyProfiles abaixo).
 const LEGACY_STORAGE_KEY = "flow_profiles_v1";
-
-function loadActiveId(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(ACTIVE_ID_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveActiveId(id: string | null) {
-  if (typeof window === "undefined") return;
-  try {
-    if (id) window.localStorage.setItem(ACTIVE_ID_KEY, id);
-    else window.localStorage.removeItem(ACTIVE_ID_KEY);
-  } catch {
-    // localStorage indisponível (aba privada, quota cheia...) — a sessão
-    // atual continua funcionando, só não lembra o perfil ativo no reload.
-  }
-}
 
 function loadLegacyProfiles(): Profile[] {
   if (typeof window === "undefined") return [];
@@ -124,7 +107,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const localActiveId = loadActiveId();
       let serverPerfis: Profile[];
       try {
         serverPerfis = await fetchProfiles();
@@ -146,9 +128,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       }
       if (cancelled) return;
       setPerfis(serverPerfis);
-      setActiveId(
-        localActiveId && serverPerfis.some((p) => p.id === localActiveId) ? localActiveId : null
-      );
+      // Nunca traz de volta um perfil ativo de uma sessão anterior — ver
+      // comentário no topo do arquivo. activeId já começa null (useState) e
+      // continua null aqui; a tela de seleção de perfil é sempre o ponto de
+      // partida de um carregamento novo do site.
       setReady(true);
     })();
     return () => {
@@ -193,14 +176,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const selectProfile = useCallback(
     (id: string) => {
       if (!perfis.some((p) => p.id === id)) return;
-      saveActiveId(id);
       setActiveId(id);
     },
     [perfis]
   );
 
   const exitProfile = useCallback(() => {
-    saveActiveId(null);
     setActiveId(null);
   }, []);
 
@@ -236,7 +217,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     (id: string) => {
       const next = perfis.filter((p) => p.id !== id);
       if (activeId === id) {
-        saveActiveId(null);
         setActiveId(null);
       }
       applyMutation(next, () => deleteProfileApi(id));
