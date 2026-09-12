@@ -26,7 +26,3 @@ export const profileNameSchema = z
 export function sanitizeProfileName(input: string): string {
   return input.replace(/[<>]/g, "").trim().slice(0, 20);
 }
-
-// Validação do corpo das rotas de /api/profiles (ver profiles-store.ts).
-export const watchlistActionSchema = z.enum(["add", "remove"]);
-export const progressSecondsSchema = z.number().finite().min(0);

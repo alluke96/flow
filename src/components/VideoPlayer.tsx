@@ -166,41 +166,41 @@ export function VideoPlayer({
    * Sair do player. O ponto aqui é a navegação acontecer NA HORA, e tudo
    * mais ficar pra depois.
    *
-   * O botão de voltar funcionava, mas demorava uma eternidade: enquanto o
-   * <video> está baixando, ele segura conexões abertas com o servidor, e o
-   * navegador limita quantas conexões simultâneas existem por host. O
-   * request de navegação do Next (buscar a página de detalhe) entrava na
-   * FILA atrás do streaming em vez de sair na hora — daí a sensação de
-   * clique morto. Soltar a mídia ANTES de navegar libera essas conexões
-   * imediatamente.
-   *
-   * O progresso é lido aqui (síncrono, com o elemento ainda válido) mas
-   * ENVIADO depois (doSaveProgress já adia por dentro) — salvar não deve
-   * segurar a saída.
+   * A ORDEM aqui é o ponto todo, e já erramos ela: soltar a mídia antes de
+   * navegar faz o vídeo pausar e ficar preto na hora, mas `pause()` dispara
+   * "pause", que mexe no contexto de perfis — exatamente o tipo de escrita
+   * que faz o React/Next abandonar uma navegação em andamento. Resultado:
+   * pausava, escurecia e NÃO voltava. Agora navega PRIMEIRO e só depois
+   * (no próximo tick, já fora do caminho da transição) solta a mídia e
+   * salva o progresso. Enquanto sai, os handlers do <video> ficam mudos
+   * (exitingRef) pra nenhum evento de desmontagem mexer em estado.
    */
   const exitingRef = useRef(false);
   const handleExit = useCallback(() => {
     if (exitingRef.current) return;
     exitingRef.current = true;
 
+    // Lê o progresso agora (síncrono, elemento ainda válido). O envio em si
+    // já é adiado por dentro de doSaveProgress.
     doSaveProgress();
 
-    const v = videoRef.current;
-    if (v) {
+    // Navega imediatamente — nada pode vir antes disto.
+    onExit();
+
+    // Só então solta a mídia: aborta o download em andamento e libera as
+    // conexões que o streaming segurava. Fica pro próximo tick pra não
+    // atravessar o commit da navegação.
+    setTimeout(() => {
+      const v = videoRef.current;
+      if (!v) return;
       try {
         v.pause();
-        // removeAttribute + load() é a forma recomendada de soltar a mídia:
-        // aborta o download em andamento e fecha a conexão. (Dispara um
-        // "error" de src vazio em alguns navegadores — por isso onError
-        // ignora o que acontecer depois de exitingRef virar true.)
         v.removeAttribute("src");
         v.load();
       } catch {
-        // se o navegador reclamar, seguir mesmo assim: sair é o que importa
+        // se o navegador reclamar, tudo bem: já saímos, que é o que importa
       }
-    }
-
-    onExit();
+    }, 0);
   }, [doSaveProgress, onExit]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
@@ -676,13 +676,19 @@ export function VideoPlayer({
         disableRemotePlayback
         controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
         onLoadedMetadata={handleLoadedMetadata}
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          if (exitingRef.current) return;
+          setCurrentTime(e.currentTarget.currentTime);
+        }}
         onProgress={handleProgress}
         onPlay={() => {
           setPlaying(true);
           showOverlay();
         }}
         onPause={() => {
+          // Saindo: o "pause" da desmontagem não pode mexer em estado nem
+          // no contexto de perfis — é isso que atropelava a navegação.
+          if (exitingRef.current) return;
           setPlaying(false);
           // O navegador dispara "pause" nativamente ao remover o <video> do
           // DOM — bem no meio de uma troca de rota (ex: "voltar" com o vídeo

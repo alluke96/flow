@@ -16,11 +16,6 @@ const RATE_LIMITS: Record<string, { limit: number; windowMs: number }> = {
   "/api/catalog": { limit: 30, windowMs: 60_000 },
   "/api/title": { limit: 60, windowMs: 60_000 },
   "/api/image": { limit: 180, windowMs: 60_000 },
-  // Escrita frequente por natureza: progresso salva a cada 5s enquanto toca
-  // (ver saveProgress em profile-context.tsx), possivelmente de mais de um
-  // dispositivo ao mesmo tempo — limite folgado o bastante pra isso, ainda
-  // travando abuso de verdade.
-  "/api/profiles": { limit: 120, windowMs: 60_000 },
 };
 
 function matchRateLimit(pathname: string) {
