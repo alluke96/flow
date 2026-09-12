@@ -6,6 +6,35 @@ import { episodeIdSchema, titleIdSchema } from "@/lib/validation";
 // nunca no Edge.
 export const runtime = "nodejs";
 
+/**
+ * Alguns contêineres que o navegador CONSEGUE demuxar são recusados de cara
+ * só por causa do MIME que o Drive reporta: mandamos
+ * `X-Content-Type-Options: nosniff` em toda resposta (ver
+ * applySecurityHeaders no proxy), o que proíbe o navegador de olhar os bytes
+ * e obriga ele a confiar 100% no Content-Type. Aí um `video/x-matroska`
+ * (que Chrome/Safari não reconhecem como tipo tocável) faz o <video> falhar
+ * com MEDIA_ERR_SRC_NOT_SUPPORTED (código 4) ANTES de tentar ler o arquivo —
+ * mesmo quando o vídeo/áudio lá dentro são H.264/AAC, perfeitamente
+ * suportados.
+ *
+ * O mapeamento abaixo só troca o rótulo por um tipo do MESMO contêiner que
+ * o navegador aceita — não é mentira sobre o formato:
+ *  - WebM é literalmente um perfil de Matroska (mesmo demuxer no Chrome).
+ *  - .mov e .m4v são ISO-BMFF, o mesmo contêiner do .mp4.
+ * Formatos genuinamente sem suporte (.wmv/.asf, .avi, .flv) ficam de fora de
+ * propósito: rotular não faria eles tocarem, só trocaria um erro claro de
+ * "formato não suportado" por um erro de decodificação confuso.
+ */
+const PLAYABLE_MIME_ALIASES: Record<string, string> = {
+  "video/x-matroska": "video/webm",
+  "video/quicktime": "video/mp4",
+  "video/x-m4v": "video/mp4",
+};
+
+function playableMime(mime: string): string {
+  return PLAYABLE_MIME_ALIASES[mime.toLowerCase()] ?? mime;
+}
+
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
@@ -53,10 +82,21 @@ export async function GET(
   }
 
   const headers: Record<string, string> = {
-    "Content-Type": result.contentType,
+    "Content-Type": playableMime(result.contentType),
     "Content-Length": String(result.contentLength),
     "Accept-Ranges": "bytes",
-    "Cache-Control": "private, no-store",
+    // "private" (nunca em cache compartilhado/proxy) mas NÃO "no-store":
+    // no-store proíbe o navegador de guardar QUALQUER pedaço da resposta,
+    // inclusive o buffer de mídia que ele precisa pra costurar os Range
+    // Requests de um seek. Com no-store, tocar do início (sequencial) até
+    // funciona, mas PULAR pra um ponto trava — tela preta, relógio
+    // congelado no destino e áudio fora de sincronia — que é exatamente o
+    // padrão "só quebra em vídeo que já tinha histórico" (histórico =>
+    // seek no load; sem histórico => sem seek => tocava normal). O
+    // conteúdo aqui é o próprio acervo do dono do servidor, então deixar o
+    // navegador dele bufferizar é seguro — e ainda economiza cota do Drive
+    // ao evitar rebaixar os mesmos bytes o tempo todo.
+    "Cache-Control": "private, max-age=3600",
   };
   if (result.range) {
     headers["Content-Range"] = `bytes ${result.range.start}-${result.range.end}/${result.totalSize}`;

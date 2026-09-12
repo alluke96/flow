@@ -46,6 +46,10 @@ interface WebkitVideoElement extends HTMLVideoElement {
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const OVERLAY_HIDE_MS = 3200;
 const DOUBLE_TAP_MS = 320;
+// Teto pra esperar o "seeked" do seek de retomada antes de dar play assim
+// mesmo (ver handleLoadedMetadata) — nunca deixa o player travado esperando
+// um evento que pode não vir.
+const RESUME_SEEK_TIMEOUT_MS = 1500;
 const NEXT_EPISODE_COUNTDOWN_S = 5;
 
 /**
@@ -197,7 +201,24 @@ export function VideoPlayer({
       // se resolver de vez, mas ainda mostrando o tempo errado. Esperar o
       // evento "seeked" (o navegador confirmando que já buscou e
       // posicionou tudo ali) antes de dar play evita a corrida inteira.
-      v.addEventListener("seeked", startPlayback, { once: true });
+      //
+      // MAS nunca dependendo SÓ disso: se "seeked" não vier (seek recusado,
+      // buffer negado, arquivo problemático...), esperar por ele pra sempre
+      // deixa o vídeo parado eternamente — e aí NADA funciona: os controles
+      // não somem (só somem com o vídeo tocando, ver scheduleHide), o
+      // relógio fica congelado no destino, e a tela fica preta. Um fallback
+      // curto garante que a reprodução comece de um jeito ou de outro.
+      let started = false;
+      let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+      function startOnce() {
+        if (started) return;
+        started = true;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        videoRef.current?.removeEventListener("seeked", startOnce);
+        startPlayback();
+      }
+      fallbackTimer = setTimeout(startOnce, RESUME_SEEK_TIMEOUT_MS);
+      v.addEventListener("seeked", startOnce);
       v.currentTime = initialTime;
     } else {
       startPlayback();
