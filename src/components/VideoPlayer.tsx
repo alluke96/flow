@@ -434,7 +434,17 @@ export function VideoPlayer({
     const t = setTimeout(() => {
       if (nextCountdown <= 1) {
         setNextCountdown(null);
-        onNextEpisodeRef.current?.();
+        // onNextEpisode chama router.replace(...), que o Next.js processa
+        // como uma transição de baixa prioridade. Chamar isso no MESMO
+        // tick síncrono que o setNextCountdown(null) acima faz o React
+        // batelar os dois — e o React pode descartar/atrasar a transição
+        // de navegação em favor do update local, fazendo o toast sumir sem
+        // trocar de episódio (só navegando bem mais tarde, de forma
+        // solta, ex: no próximo clique). Mesma causa raiz do bug já
+        // corrigido em onPause/no efeito de desmonte: nunca misturar um
+        // router.replace/push com outro setState no mesmo tick síncrono.
+        // Adiar pro próximo tick resolve.
+        setTimeout(() => onNextEpisodeRef.current?.(), 0);
       } else {
         setNextCountdown(nextCountdown - 1);
       }
