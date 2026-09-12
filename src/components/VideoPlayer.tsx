@@ -74,7 +74,7 @@ export function VideoPlayer({
   const draggingRef = useRef(false);
   const dragPctRef = useRef<number | null>(null);
 
-  const { saveProgress } = useProfiles();
+  const { saveProgress, syncProfiles } = useProfiles();
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -200,8 +200,16 @@ export function VideoPlayer({
       } catch {
         // se o navegador reclamar, tudo bem: já saímos, que é o que importa
       }
+
+      // Agora sim, com a navegação já feita e a mídia solta, o progresso
+      // que acabou de ser salvo localmente pode ir pro servidor (pros
+      // outros aparelhos enxergarem). É manda-e-esquece via sendBeacon:
+      // não segura conexão nem volta pra mexer em estado. Este timeout roda
+      // depois do agendado por doSaveProgress, então o que sai daqui já
+      // inclui o minuto em que o vídeo parou.
+      syncProfiles();
     }, 0);
-  }, [doSaveProgress, onExit]);
+  }, [doSaveProgress, onExit, syncProfiles]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
   function handleLoadedMetadata() {

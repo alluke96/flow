@@ -123,7 +123,7 @@ export function ProfileScreen() {
             {managing ? "Concluído" : "Gerenciar perfis"}
           </button>
         )}
-        <p className="profiles-note">Os perfis ficam salvos apenas neste navegador.</p>
+        <p className="profiles-note">Os perfis ficam salvos no servidor — os mesmos em todos os aparelhos.</p>
         <p className="profiles-version">v{pkg.version}</p>
       </div>
 

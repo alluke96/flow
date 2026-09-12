@@ -16,6 +16,10 @@ const RATE_LIMITS: Record<string, { limit: number; windowMs: number }> = {
   "/api/catalog": { limit: 30, windowMs: 60_000 },
   "/api/title": { limit: 60, windowMs: 60_000 },
   "/api/image": { limit: 180, windowMs: 60_000 },
+  // Perfis: só é chamado em momento pontual (abrir o app, esconder a aba,
+  // sair do player, mexer na tela de perfis) — nunca em intervalo fixo.
+  // Folga suficiente pra vários aparelhos na mesma casa (mesmo IP na LAN).
+  "/api/profiles": { limit: 60, windowMs: 60_000 },
 };
 
 function matchRateLimit(pathname: string) {
