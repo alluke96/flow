@@ -30,8 +30,21 @@ export async function GET(
   // openVideo valida internamente que `id`/`ep` existem no catálogo
   // conhecido antes de tocar em qualquer credencial/fileId do Drive — é
   // essa checagem que impede IDOR neste endpoint (spec, seção 7).
-  const result = await source.openVideo(idResult.data, episodeParam, rangeHeader);
+  //
+  // Log explícito em qualquer falha aqui: sem isso, um erro ao abrir o
+  // vídeo (Drive fora do ar, credencial expirada, id desconhecido...) só
+  // aparecia pro usuário como o <video> genericamente "não conseguiu
+  // reproduzir" — sem nada no log do servidor (ver flow.log no self-host)
+  // pra saber se a causa foi essa ou outra coisa inteiramente.
+  let result;
+  try {
+    result = await source.openVideo(idResult.data, episodeParam, rangeHeader);
+  } catch (err) {
+    console.error(`[stream] falha ao abrir vídeo ${idResult.data} (ep=${episodeParam}):`, err);
+    return NextResponse.json({ error: "falha ao abrir o vídeo" }, { status: 500 });
+  }
   if (!result) {
+    console.error(`[stream] vídeo não encontrado: ${idResult.data} (ep=${episodeParam})`);
     return NextResponse.json({ error: "vídeo não encontrado" }, { status: 404 });
   }
 

@@ -419,8 +419,6 @@ a {
   position: relative;
   height: min(78vh, 720px);
   min-height: 420px;
-  display: flex;
-  align-items: flex-end;
 }
 .hero-bg {
   position: absolute;
@@ -445,11 +443,28 @@ a {
     rgba(10, 10, 11, 0.55) 100%
   );
 }
+/* Absoluto, empilhado sobre .hero-bg/.hero-fade: durante uma troca de slide
+   existem DOIS (o antigo esmaecendo, o novo entrando) e precisam ocupar
+   exatamente a mesma caixa, senão não crossfada — só trocaria de lugar. */
 .hero-content {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   padding: 0 clamp(16px, 4vw, 48px) 48px;
   max-width: 640px;
-  animation: fade-in-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Mesma duração/curva do crossfade da imagem (.hero-bg-current) —
+   sincronizado de propósito, pra não dar a impressão de que o texto está
+   atrasado em relação à imagem. */
+.hero-content-current {
+  animation: fade-in 0.9s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+/* Camada de baixo durante a troca (mesmo papel que .hero-bg tem pra
+   imagem): fica parada em opacidade 1 até a de cima cobrir ela por
+   completo, sem clique — ela está a caminho de sumir. */
+.hero-content-prev {
+  pointer-events: none;
 }
 .hero-title {
   font-size: clamp(32px, 5.5vw, 64px);
@@ -832,14 +847,6 @@ a {
 .player-overlay {
   position: absolute;
   inset: 0;
-  /* Reserva o espaço que o .player-top ocupa (agora fora daqui, numa camada
-     própria — ver comentário nele): sem isso, .player-center (flex:1)
-     cresce até o topo de verdade e a caixa dele fica por cima do botão de
-     voltar mesmo sem conteúdo visível ali, roubando o clique. */
-  padding-top: calc(84px + env(safe-area-inset-top));
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
   opacity: 1;
   transition: opacity 0.25s;
   background: linear-gradient(
@@ -916,17 +923,30 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Absoluto e ocupando a caixa TODA do player, de propósito: precisa
+   centralizar no mesmo box que o <video> usa (object-fit: contain) pra
+   bater com o centro real da imagem, mesmo quando ela aparece "letterboxed"
+   (barras pretas em cima/embaixo — comum em celular tocando sem fullscreen
+   de verdade). Antes isso vinha de flex:1 dentro de .player-overlay COM
+   padding-top reservado pro topo mas SEM nada reservado embaixo pro
+   .player-bottom (que tem altura própria, variável) — a sobra ficava
+   descentralizada em relação ao vídeo, deslocada pra cima. pointer-events
+   none aqui + auto nos botões: não pode bloquear cliques na barra de baixo
+   nem no botão de voltar, que ficam por baixo dessa caixa cheia. */
 .player-center {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 48px;
+  pointer-events: none;
 }
 .player-center button {
   opacity: 0.9;
   padding: 12px;
   border-radius: 50%;
+  pointer-events: auto;
   transition: opacity 0.15s, background-color 0.15s, transform 0.1s;
 }
 .player-center button svg {
@@ -947,6 +967,13 @@ a {
   height: 44px !important;
 }
 .player-bottom {
+  /* Antes vinha do flex-column de .player-overlay (space-between); virou
+     absoluto porque .player-overlay não é mais um flex container (ver
+     .player-center) — precisa se ancorar embaixo sozinho agora. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   padding: 10px clamp(16px, 3vw, 40px) max(26px, env(safe-area-inset-bottom));
 }
 .progress-row {
@@ -1270,6 +1297,13 @@ a {
   color: var(--text-dim);
   line-height: 1.5;
 }
+.player-error-code {
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  color: var(--text-faint);
+  margin-top: 10px !important;
+  font-family: monospace;
+}
 
 @media (max-width: 640px) {
   .card {
@@ -1288,15 +1322,6 @@ a {
   }
   .player-center {
     gap: 28px;
-    /* No mobile o vídeo costuma tocar sem fullscreen de verdade (Safari
-       inline) — o .player-shell ocupa a página inteira, bem mais alto que
-       a imagem do vídeo em si (que fica com barras pretas grandes acima e
-       abaixo, ver <video object-fit:contain>). Centralizar dentro da caixa
-       inteira deixa os botões visivelmente acima do centro da IMAGEM, que é
-       o que o olho realmente usa como referência. Empurra pra baixo um
-       pouco pra compensar — aproximado (não sabemos a altura real do vídeo
-       renderizado sem medir via JS), ajustar se ainda não bater. */
-    transform: translateY(48px);
   }
   .player-center button svg {
     width: 24px;

@@ -87,6 +87,18 @@ export function VideoPlayer({
   const [ended, setEnded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [playbackError, setPlaybackError] = useState(false);
+  // Detalhe real do MediaError (ver onError) — sem isso, QUALQUER falha
+  // (rede/CORS bloqueando o request, arquivo corrompido, codec não suportado
+  // de verdade...) mostrava a mesma mensagem genérica de ".mkv não
+  // compatível", mesmo quando a causa real era outra inteiramente (ex: uma
+  // resposta 403/500 no lugar dos bytes do vídeo — o <video> não sabe
+  // diferenciar isso de um arquivo ilegível, e a mensagem genérica escondia
+  // qual dos dois realmente aconteceu). Mostrar o código/mensagem de
+  // verdade permite saber a causa real da próxima vez, em vez de adivinhar.
+  const [playbackErrorDetail, setPlaybackErrorDetail] = useState<{
+    code: number | undefined;
+    message: string;
+  } | null>(null);
   // depois do primeiro play, um "waiting" (rebuffer no meio de um seek, por
   // exemplo) não deve mais esconder os botões atrás de um spinner — só o
   // carregamento inicial faz isso
@@ -557,10 +569,18 @@ export function VideoPlayer({
           setLoading(false);
           setHasPlayedOnce(true);
         }}
-        onError={() => {
+        onError={(e) => {
           // navegador não conseguiu decodificar/abrir o arquivo (contêiner
-          // não suportado, ex: .mkv no Chrome/Safari, arquivo corrompido...)
-          // — para de girar o spinner pra sempre e avisa em vez de travar.
+          // não suportado, arquivo corrompido, MAS TAMBÉM uma resposta de
+          // erro HTTP no lugar dos bytes do vídeo — ex: um 403/429/500 do
+          // nosso próprio servidor) — para de girar o spinner pra sempre e
+          // avisa em vez de travar. Guarda o MediaError de verdade (ver
+          // playbackErrorDetail) pra não esconder qual dessas causas foi.
+          const mediaError = e.currentTarget.error;
+          setPlaybackErrorDetail({
+            code: mediaError?.code,
+            message: mediaError?.message || "sem detalhes",
+          });
           setLoading(false);
           setPlaybackError(true);
         }}
@@ -586,9 +606,24 @@ export function VideoPlayer({
             <div className="player-error">
               <p>Não foi possível reproduzir este vídeo.</p>
               <p className="player-error-hint">
-                O formato do arquivo pode não ser compatível com o navegador (ex: .mkv não toca
-                em Chrome/Safari — prefira .mp4 com vídeo H.264 e áudio AAC).
+                {playbackErrorDetail?.code === 2
+                  ? // MEDIA_ERR_NETWORK: o navegador NÃO recebeu o arquivo de
+                    // vídeo de verdade — algo entre ele e o servidor falhou
+                    // (conexão caiu, CORS bloqueou, o servidor respondeu
+                    // com erro em vez dos bytes do vídeo). Não é o formato.
+                    "Falha de rede ao carregar o vídeo — não chegou a baixar o suficiente pra tocar. Verifique a conexão com o servidor e tente de novo."
+                  : playbackErrorDetail?.code === 3
+                    ? // MEDIA_ERR_DECODE: os bytes chegaram, mas o navegador
+                      // não conseguiu decodificá-los (arquivo corrompido, ou
+                      // um codec dentro do contêiner que ele não suporta).
+                      "O navegador recebeu o arquivo mas não conseguiu decodificá-lo — o codec dentro dele pode não ser suportado, ou o arquivo está corrompido."
+                    : "O formato do arquivo pode não ser compatível com o navegador (ex: .mkv não toca em Chrome/Safari — prefira .mp4 com vídeo H.264 e áudio AAC)."}
               </p>
+              {playbackErrorDetail && (
+                <p className="player-error-code">
+                  Detalhe técnico: código {playbackErrorDetail.code ?? "?"} — {playbackErrorDetail.message}
+                </p>
+              )}
             </div>
           </div>
         ) : loading && !hasPlayedOnce ? (

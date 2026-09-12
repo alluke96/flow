@@ -34,15 +34,31 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
   // camada por baixo enquanto o novo entra com fade-in por cima; depois que
   // a animação termina, solta a camada de baixo.
   const [prevTitle, setPrevTitle] = useState<TitleSummary | null>(null);
-  const lastTitleRef = useRef(title);
 
+  // Limpa a camada antiga depois que a de cima termina de cobrir ela por
+  // completo. Só cleanup (não afeta o que aparece na tela) — pode rodar
+  // depois do commit sem problema, ao contrário de setPrevTitle em si (ver
+  // changeSlide abaixo).
   useEffect(() => {
-    if (lastTitleRef.current.id === title.id) return;
-    setPrevTitle(lastTitleRef.current);
-    lastTitleRef.current = title;
+    if (!prevTitle) return;
     const t = setTimeout(() => setPrevTitle(null), FADE_MS);
     return () => clearTimeout(t);
-  }, [title]);
+  }, [prevTitle]);
+
+  // Troca o slide E guarda o título que estava na tela num ÚNICO evento
+  // (setPrevTitle + setIndex chamados juntos, síncronos, no mesmo handler —
+  // React agrupa os dois numa render só). Antes, prevTitle vinha de um
+  // useEffect observando `title` mudar — só que esse efeito roda DEPOIS do
+  // React já ter pintado a tela com o título novo, então por um frame a
+  // camada de baixo (prevTitle) ainda não existia: só a imagem/texto novos
+  // apareciam, entrando do zero (opacity 0) sem nada por baixo — um flash
+  // visível pro preto/gradiente antes da camada antiga reaparecer no frame
+  // seguinte. Era esse frame sem camada de baixo, e não a duração do fade,
+  // que dava a impressão de "flick"/pisca e de o texto "atrasar".
+  function changeSlide(newIndex: number) {
+    setPrevTitle(title);
+    setIndex(newIndex);
+  }
 
   // Pré-carrega todos os banners do carrossel assim que a lista chega, em
   // vez de só quando cada slide entra. Sem isso, o crossfade (abaixo) começa
@@ -74,9 +90,10 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
   useEffect(() => {
     if (titles.length < 2) return;
     const id = setInterval(() => {
-      setIndex((i) => (i + 1) % titles.length);
+      changeSlide((index + 1) % titles.length);
     }, ROTATE_MS);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [titles.length, index]);
 
   // Swipe por toque (smartphone/tablet): compara só a posição inicial e
@@ -103,7 +120,7 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     // Soma titles.length antes do módulo pra funcionar com delta negativo
     // também (voltar do primeiro slide vai pro último — cycle nos dois
     // sentidos, igual ao avanço automático já faz).
-    setIndex((i) => (i + delta + titles.length) % titles.length);
+    changeSlide((index + delta + titles.length) % titles.length);
   }
 
   function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
@@ -124,6 +141,37 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     goTo(dx < 0 ? 1 : -1);
   }
 
+  // Texto crossfada junto com a imagem, mesma duração/curva — pedido
+  // explícito: sincronizado com a imagem, sem sensação de atraso. `isPrev`
+  // é só decoração enquanto esmaece (pointer-events:none, sem onClick).
+  function renderContent(t: TitleSummary, isPrev: boolean) {
+    const progress = isPrev ? Boolean(getProgress(t.id)) : hasProgress;
+    return (
+      <div
+        key={`${t.id}-content${isPrev ? "-prev" : ""}`}
+        className={`hero-content${isPrev ? " hero-content-prev" : " hero-content-current"}`}
+      >
+        <h1 className="hero-title">{t.titulo}</h1>
+        <div className="hero-meta">{metaLine(t)}</div>
+        <p className="hero-desc">{t.sinopse}</p>
+        <div className="hero-actions">
+          <button className="btn-hero play" onClick={isPrev ? undefined : handlePlay} tabIndex={isPrev ? -1 : 0}>
+            ▶ {progress ? "Continuar assistindo" : "Assistir"}
+          </button>
+          <Link
+            href={`/title/${t.id}`}
+            className="btn-hero info"
+            tabIndex={isPrev ? -1 : 0}
+            aria-hidden={isPrev}
+          >
+            ⓘ Detalhes
+          </Link>
+        </div>
+        {!isPrev && unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="hero" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {prevTitle && (
@@ -138,25 +186,8 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
         style={{ backgroundImage: `url('${bannerUrl(title.id)}')` }}
       />
       <div className="hero-fade" />
-      {/* Ao contrário da imagem, o texto NÃO crossfada com o anterior — duas
-          fotos se misturando fica natural, dois blocos de texto sobrepostos
-          no mesmo lugar (títulos/sinopses de tamanhos diferentes) só parece
-          embaralhado. Troca de `key` derruba o bloco antigo na hora e o novo
-          entra deslizando de baixo pra cima, sem sobreposição. */}
-      <div key={`${title.id}-content`} className="hero-content">
-        <h1 className="hero-title">{title.titulo}</h1>
-        <div className="hero-meta">{metaLine(title)}</div>
-        <p className="hero-desc">{title.sinopse}</p>
-        <div className="hero-actions">
-          <button className="btn-hero play" onClick={handlePlay}>
-            ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
-          </button>
-          <Link href={`/title/${title.id}`} className="btn-hero info">
-            ⓘ Detalhes
-          </Link>
-        </div>
-        {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
-      </div>
+      {prevTitle && renderContent(prevTitle, true)}
+      {renderContent(title, false)}
     </div>
   );
 }
