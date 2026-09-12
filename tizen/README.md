@@ -31,7 +31,15 @@ não manda mais `X-Frame-Options`.
    de tela que o perfil `tv-samsung` não conhece faz o validador recusar o
    projeto e o launch nem começa.
 3. Ajuste `URL_FLOW` no topo do `index.html` pro IP do PC.
-4. Coloque um `icon.png` (512x423 é o tamanho que a Samsung usa).
+4. Copie o `icon.png` daqui pra raiz do projeto (512x423, que é o tamanho
+   que a Samsung usa na fileira de apps). Tem também `icon-512.png`, a
+   versão quadrada, pra onde for pedido 1:1.
+
+   Os dois são o wordmark do site: Space Grotesk 700, `letter-spacing`
+   -0.04em, `#f5f5f7` sobre `#0a0a0b` — os mesmos valores de `.brand` em
+   `globals.css` e dos tokens `--text`/`--bg`. Foram renderizados no
+   Chromium a partir do arquivo de fonte que o `next/font` gera no build,
+   então batem com a marca da web, não são uma aproximação.
 5. Certificado: Certificate Manager → `+` → **Samsung** → **TV** (precisa da
    extensão "Samsung Certificate Extension" no Package Manager, e da TV
    conectada via `sdb`, porque o certificado é amarrado ao DUID dela).
