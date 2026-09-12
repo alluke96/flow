@@ -203,6 +203,15 @@ a {
   font-size: 12px;
   color: var(--text-faint);
 }
+/* Só pra eu (e você) conferir rapidamente qual build está no ar sem
+   precisar checar o Vercel — de propósito quase invisível, não é uma
+   informação que o usuário final precisa notar. */
+.profiles-version {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-faint);
+  opacity: 0.4;
+}
 .profile-card.managing .profile-avatar-btn {
   border-color: var(--accent-2);
 }

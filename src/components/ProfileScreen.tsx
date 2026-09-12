@@ -7,6 +7,7 @@ import { avatarSrc } from "@/lib/avatars";
 import { refreshCatalog } from "@/lib/api-client";
 import { ProfileModal } from "./ProfileModal";
 import type { Profile } from "@/types/profile";
+import pkg from "../../package.json";
 
 function RefreshIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -123,6 +124,7 @@ export function ProfileScreen() {
           </button>
         )}
         <p className="profiles-note">Os perfis ficam salvos apenas neste navegador.</p>
+        <p className="profiles-version">v{pkg.version}</p>
       </div>
 
       {creating && (
