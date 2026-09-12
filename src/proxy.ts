@@ -78,19 +78,32 @@ export function proxy(req: NextRequest) {
   const csp = buildCsp(nonce);
 
   if (pathname.startsWith("/api/")) {
-    // CORS restrito: só a própria origem pode chamar /api/*. Em vez de
-    // comparar contra um domínio único fixo (o que quebra assim que o app
-    // roda em mais de um endereço — self-host acessado por IP, hostname
-    // .local, um domínio local via Pi-hole/AdGuard, etc., além do Vercel),
-    // compara contra o Host da própria request: uma chamada same-origin de
-    // verdade sempre tem Origin === "<protocolo>://<host que ela mesma
-    // recebeu>", não importa qual endereço isso seja. Uma origem diferente
-    // (outro site tentando chamar essa API) nunca bate com o Host da
-    // request dela mesma, então continua barrada igual.
+    // CORS restrito: só a própria origem pode fazer requests que MUDAM
+    // estado em /api/* (é o que de fato importa proteger — um site hostil
+    // induzindo o navegador de alguém a chamar isso é o cenário clássico de
+    // CSRF). GET/HEAD ficam de fora de propósito: são leitura pura
+    // (catálogo, imagem, STREAMING DE VÍDEO) e bloquear eles por engano é
+    // muito pior que o risco que essa checagem evita num app sem login (não
+    // tem sessão/cookie de ninguém pra proteger de CSRF em primeiro lugar).
+    //
+    // Essa distinção importa na prática, não só em teoria: antes desta app
+    // comparar Origin contra o Host da própria request (em vez de um
+    // domínio fixo em NEXT_PUBLIC_SITE_ORIGIN, opcional), a checagem inteira
+    // ficava desligada sempre que essa variável não estivesse configurada —
+    // que era exatamente o caso do self-host. Vídeo sempre "funcionou"
+    // simplesmente porque a checagem nunca rodava de verdade. Assim que ela
+    // passou a rodar sempre, algum request de streaming (Origin enviado
+    // pelo navegador/TV não batendo com o Host que o servidor recebeu —
+    // porta, hostname .local, sei lá) começou a tomar 403 no meio da
+    // reprodução: o <video> recebe um JSON de erro no lugar dos bytes do
+    // arquivo, falha ao decodificar AQUILO, e a mensagem genérica de erro
+    // do player (que não distingue rede de codec) aponta pro formato do
+    // arquivo — mesmo sendo, na real, um bloqueio de CORS.
     const origin = req.headers.get("origin");
     const host = req.headers.get("host");
     const expectedOrigin = host ? `${req.nextUrl.protocol}//${host}` : null;
-    if (origin && expectedOrigin && origin !== expectedOrigin) {
+    const isSafeMethod = req.method === "GET" || req.method === "HEAD";
+    if (!isSafeMethod && origin && expectedOrigin && origin !== expectedOrigin) {
       const res = NextResponse.json({ error: "origem não permitida" }, { status: 403 });
       res.headers.set("Content-Security-Policy", csp);
       return applySecurityHeaders(res);
