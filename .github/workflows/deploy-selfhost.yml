@@ -1,0 +1,37 @@
+name: Deploy to self-hosted Windows
+
+# Runs on the self-hosted runner registered on your Windows PC (see
+# docs/selfhost-windows.md for the one-time setup). Nothing here touches
+# Vercel — this is a separate, independent deploy target.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # .env.local has real secrets (Drive service account key) — it must
+      # never live in git. It's kept once, outside the checkout, at
+      # C:\flow-secrets\.env.local, and copied into the fresh checkout on
+      # every deploy instead.
+      - name: Restore local secrets
+        shell: powershell
+        run: Copy-Item "C:\flow-secrets\.env.local" -Destination ".env.local" -Force
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # NSSM-managed Windows service named "Flow" (see setup doc). Restarting
+      # it re-launches `next start` against the build that was just produced
+      # in this same checkout, which is why the service's working directory
+      # must point at wherever the runner checks this repo out to.
+      - name: Restart service
+        shell: powershell
+        run: Restart-Service -Name "Flow"
