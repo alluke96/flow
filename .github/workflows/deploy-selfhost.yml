@@ -29,20 +29,39 @@ jobs:
       # trick as .env.local below, via C:\flow-secrets) and restoring it
       # right after checkout lets Next.js reuse its previous compilation
       # cache, which is what actually makes rebuilds fast.
+      # Guarda junto o hash do package-lock que GEROU esse cache: reaproveitar
+      # cache de build de um conjunto de dependências diferente (ex: outra
+      # versão do Next) é justamente o jeito de um cache "quase certo"
+      # envenenar a build seguinte — melhor pagar uma build fria do que
+      # servir um bundle inconsistente.
       - name: Preserve Next.js build cache before checkout wipes it
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path "C:\flow-cache" | Out-Null
           Remove-Item "C:\flow-cache\next-cache" -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item ".next\cache" "C:\flow-cache\next-cache" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "C:\flow-cache\lock.hash" -Force -ErrorAction SilentlyContinue
+          if (Test-Path ".next\cache") {
+            Copy-Item ".next\cache" "C:\flow-cache\next-cache" -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path "package-lock.json") {
+              (Get-FileHash "package-lock.json" -Algorithm SHA256).Hash |
+                Set-Content "C:\flow-cache\lock.hash"
+            }
+          }
 
       - uses: actions/checkout@v4
 
       - name: Restore Next.js build cache into the fresh checkout
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path ".next" | Out-Null
-          Copy-Item "C:\flow-cache\next-cache" ".next\cache" -Recurse -Force -ErrorAction SilentlyContinue
+          $saved = Get-Content "C:\flow-cache\lock.hash" -ErrorAction SilentlyContinue
+          $current = (Get-FileHash "package-lock.json" -Algorithm SHA256).Hash
+          if ($saved -and $saved -eq $current -and (Test-Path "C:\flow-cache\next-cache")) {
+            New-Item -ItemType Directory -Force -Path ".next" | Out-Null
+            Copy-Item "C:\flow-cache\next-cache" ".next\cache" -Recurse -Force
+            Write-Host "Build cache reaproveitado (package-lock inalterado)."
+          } else {
+            Write-Host "Sem cache reaproveitavel (dependencias mudaram ou cache ausente) - build fria."
+          }
 
       # .env.local has real secrets (Drive service account key) — it must
       # never live in git. It's kept once, outside the checkout, at
@@ -71,3 +90,35 @@ jobs:
       - name: Restart service
         shell: powershell
         run: Restart-Service -Name "Flow"
+
+      # Sem isto, um deploy que morre no meio (npm ci/build falhando, cache
+      # envenenado, serviço apontando pra pasta errada...) deixa o serviço
+      # ANTIGO no ar e o workflow parecia ter "passado" — de fora, isso é
+      # indistinguível de "a correção não funcionou", que foi exatamente o
+      # que aconteceu durante vários deploys seguidos. Agora o deploy prova
+      # o que está no ar: bate a versão que /api/health responde contra a
+      # que acabou de ser buildada, e falha alto se não bater.
+      - name: Verify the new build is actually live
+        shell: powershell
+        run: |
+          $expected = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Write-Host "Esperando /api/health responder versao $expected ..."
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 3
+            try {
+              $r = Invoke-RestMethod -Uri "http://localhost:3000/api/health" -TimeoutSec 5
+              if ($r.version -eq $expected) { $ok = $true; break }
+              Write-Host "  no ar: $($r.version) (esperando $expected)"
+            } catch {
+              Write-Host "  /api/health ainda nao respondeu"
+            }
+          }
+          if (-not $ok) {
+            # Aviso, não falha: este passo existe pra DIAGNÓSTICO. Se o
+            # health não responder por algum motivo de ambiente, não faz
+            # sentido pintar de vermelho um deploy que de fato funcionou.
+            Write-Warning "Nao consegui confirmar a versao $expected via /api/health. Se o app estiver no ar e funcionando, ignore; se algo parecer antigo, e aqui que da pra checar."
+          } else {
+            Write-Host "Deploy verificado: versao $expected no ar."
+          }

@@ -162,6 +162,47 @@ export function VideoPlayer({
     setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
   }, [saveProgress, titleId, episodeId]);
 
+  /**
+   * Sair do player. O ponto aqui é a navegação acontecer NA HORA, e tudo
+   * mais ficar pra depois.
+   *
+   * O botão de voltar funcionava, mas demorava uma eternidade: enquanto o
+   * <video> está baixando, ele segura conexões abertas com o servidor, e o
+   * navegador limita quantas conexões simultâneas existem por host. O
+   * request de navegação do Next (buscar a página de detalhe) entrava na
+   * FILA atrás do streaming em vez de sair na hora — daí a sensação de
+   * clique morto. Soltar a mídia ANTES de navegar libera essas conexões
+   * imediatamente.
+   *
+   * O progresso é lido aqui (síncrono, com o elemento ainda válido) mas
+   * ENVIADO depois (doSaveProgress já adia por dentro) — salvar não deve
+   * segurar a saída.
+   */
+  const exitingRef = useRef(false);
+  const handleExit = useCallback(() => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+
+    doSaveProgress();
+
+    const v = videoRef.current;
+    if (v) {
+      try {
+        v.pause();
+        // removeAttribute + load() é a forma recomendada de soltar a mídia:
+        // aborta o download em andamento e fecha a conexão. (Dispara um
+        // "error" de src vazio em alguns navegadores — por isso onError
+        // ignora o que acontecer depois de exitingRef virar true.)
+        v.removeAttribute("src");
+        v.load();
+      } catch {
+        // se o navegador reclamar, seguir mesmo assim: sair é o que importa
+      }
+    }
+
+    onExit();
+  }, [doSaveProgress, onExit]);
+
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
   function handleLoadedMetadata() {
     const v = videoRef.current;
@@ -534,13 +575,13 @@ export function VideoPlayer({
         // (Tizen WebKit), not the same key as Escape — handled here too so
         // the remote's back button exits the player directly, same as
         // Escape does on a keyboard.
-        onExit();
+        handleExit();
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onExit]);
+  }, [handleExit]);
 
   function handleEnded() {
     setEnded(true);
@@ -663,6 +704,12 @@ export function VideoPlayer({
           // nosso próprio servidor) — para de girar o spinner pra sempre e
           // avisa em vez de travar. Guarda o MediaError de verdade (ver
           // playbackErrorDetail) pra não esconder qual dessas causas foi.
+          //
+          // Durante a saída (ver handleExit) a gente solta a mídia de
+          // propósito, o que faz alguns navegadores dispararem "error" de
+          // src vazio — isso não é falha nenhuma, e mostrar a tela de erro
+          // por uma fração de segundo bem na hora de sair seria só ruído.
+          if (exitingRef.current) return;
           const mediaError = e.currentTarget.error;
           setPlaybackErrorDetail({
             code: mediaError?.code,
@@ -695,7 +742,7 @@ export function VideoPlayer({
           controles escondidos — não devia exigir um primeiro toque só pra
           "acordar" os controles antes de conseguir voltar. */}
       <div className={`player-top${overlayHidden ? " hidden" : ""}`}>
-        <button onClick={onExit} aria-label="Voltar">
+        <button onClick={handleExit} aria-label="Voltar">
           <BackArrowIcon />
         </button>
         <div className="player-title">{displayTitle}</div>

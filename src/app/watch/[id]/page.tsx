@@ -57,6 +57,15 @@ function WatchInner() {
     };
   }, [id]);
 
+  // Prefetch da rota de saída enquanto o vídeo toca. Sem isso, o "voltar" só
+  // COMEÇA a buscar a página de detalhe no momento do clique — e como ela é
+  // dinâmica (renderizada no servidor), essa ida e volta acontece inteira
+  // com o usuário ainda olhando pro player, que era boa parte do "o voltar
+  // demora uma eternidade". Com o payload já em cache, a troca é imediata.
+  useEffect(() => {
+    router.prefetch(`/title/${id}`);
+  }, [id, router]);
+
   if (loading) return <PlayerLoading />;
 
   if (error || !title) {
