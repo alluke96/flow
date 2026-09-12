@@ -22,7 +22,27 @@ jobs:
         shell: powershell
         run: Stop-Service -Name "Flow" -ErrorAction SilentlyContinue
 
+      # actions/checkout wipes untracked files (.next included) before every
+      # deploy, so `next build` always started cold ("No build cache found")
+      # and took several minutes rebuilding everything from scratch each
+      # time. Squirreling .next/cache away outside the checkout first (same
+      # trick as .env.local below, via C:\flow-secrets) and restoring it
+      # right after checkout lets Next.js reuse its previous compilation
+      # cache, which is what actually makes rebuilds fast.
+      - name: Preserve Next.js build cache before checkout wipes it
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "C:\flow-cache" | Out-Null
+          Remove-Item "C:\flow-cache\next-cache" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item ".next\cache" "C:\flow-cache\next-cache" -Recurse -Force -ErrorAction SilentlyContinue
+
       - uses: actions/checkout@v4
+
+      - name: Restore Next.js build cache into the fresh checkout
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path ".next" | Out-Null
+          Copy-Item "C:\flow-cache\next-cache" ".next\cache" -Recurse -Force -ErrorAction SilentlyContinue
 
       # .env.local has real secrets (Drive service account key) — it must
       # never live in git. It's kept once, outside the checkout, at
