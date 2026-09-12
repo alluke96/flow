@@ -13,6 +13,7 @@ import type { Profile, ProfileStore, WatchProgress } from "@/types/profile";
 import { MAX_PROFILES } from "@/types/profile";
 import { DEFAULT_AVATAR_ID, isValidAvatarId } from "@/lib/avatars";
 import { sanitizeProfileName } from "@/lib/validation";
+import { useTVNav } from "@/lib/tv-nav";
 
 /**
  * Camada de perfis locais (sem login) — persistida em localStorage no
@@ -86,6 +87,9 @@ interface ProfileContextValue {
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
+  // Registered once here (wraps every route in the root layout) instead of
+  // per-page — TV remote/D-pad navigation then works everywhere for free.
+  useTVNav();
   const [store, setStore] = useState<ProfileStore>(emptyStore);
   const [ready, setReady] = useState(false);
 
