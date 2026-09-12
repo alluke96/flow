@@ -163,25 +163,45 @@ export function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     setDuration(v.duration || 0);
-    if (initialTime > 1 && initialTime < (v.duration || Infinity) - 2) {
-      v.currentTime = initialTime;
-    }
+
     // Tenta autoplay COM som primeiro (como YouTube/Netflix) — só cai pra
     // mudo se o navegador rejeitar. Isso funciona sempre que o navegador já
     // "confia" no site pra tocar som sozinho (ex: usuário já assistiu algo
     // aqui com som antes); é a política de autoplay do navegador, não tem
     // como forçar passar por cima dela, só tentar da forma mais provável de
     // funcionar e cair pra mudo graciosamente quando não der.
-    v.muted = false;
-    v.play()
-      .then(() => setMuted(false))
-      .catch(() => {
-        v.muted = true;
-        setMuted(true);
-        v.play().catch(() => {
-          // nem mudo tocou sozinho — fica pausado, usuário dá play manualmente
+    function startPlayback() {
+      if (!v) return;
+      v.muted = false;
+      v.play()
+        .then(() => setMuted(false))
+        .catch(() => {
+          v.muted = true;
+          setMuted(true);
+          v.play().catch(() => {
+            // nem mudo tocou sozinho — fica pausado, usuário dá play manualmente
+          });
         });
-      });
+    }
+
+    if (initialTime > 1 && initialTime < (v.duration || Infinity) - 2) {
+      // Buscar um ponto que ainda não foi baixado é assíncrono de verdade
+      // aqui — o vídeo é servido via Range Requests (ver /api/stream), então
+      // pular pra 1:32 exige um NOVO request ao servidor por aqueles bytes
+      // específicos antes do navegador ter algo pra tocar dali. Chamar
+      // play() imediatamente (como era antes), sem esperar isso terminar,
+      // deixava o navegador tocar o que já tinha bufferizado perto do
+      // início enquanto o relógio na tela ficava travado no valor pedido
+      // (timeupdate não dispara com uma seek pendente) — áudio e vídeo
+      // ficavam fora de sincronia até outra seek (ex: ±10s) forçar tudo a
+      // se resolver de vez, mas ainda mostrando o tempo errado. Esperar o
+      // evento "seeked" (o navegador confirmando que já buscou e
+      // posicionou tudo ali) antes de dar play evita a corrida inteira.
+      v.addEventListener("seeked", startPlayback, { once: true });
+      v.currentTime = initialTime;
+    } else {
+      startPlayback();
+    }
   }
 
   function handleProgress() {
