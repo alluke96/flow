@@ -39,7 +39,21 @@ const EVENTOS_VIDEO = [
   "abort",
   "error",
   "canplay",
+  // "emptied": dispara quando o recurso vira inutilizável de repente (ex:
+  // a conexão caindo no meio de um redeploy do self-host) — quer testar
+  // se currentTime/estado do progresso ficam bagunçados nesse instante.
+  "emptied",
 ] as const;
+
+/** "0.0-134.2, 200.0-210.0" — texto das faixas em video.seekable/buffered. */
+function formatarRanges(ranges: TimeRanges): string {
+  if (ranges.length === 0) return "(vazio)";
+  const partes: string[] = [];
+  for (let i = 0; i < ranges.length; i++) {
+    partes.push(`${ranges.start(i).toFixed(1)}-${ranges.end(i).toFixed(1)}`);
+  }
+  return partes.join(", ");
+}
 
 function descreverAlvo(el: EventTarget | null): string {
   if (!(el instanceof Element)) return String(el);
@@ -128,7 +142,9 @@ export function DebugOverlay() {
       }
       setVideoInfo(
         `t=${v.currentTime.toFixed(1)}/${v.duration ? v.duration.toFixed(1) : "?"}` +
-          ` seeking=${v.seeking} paused=${v.paused} readyState=${v.readyState}`
+          ` seeking=${v.seeking} paused=${v.paused} readyState=${v.readyState}` +
+          ` networkState=${v.networkState}` +
+          `\nseekable=[${formatarRanges(v.seekable)}] buffered=[${formatarRanges(v.buffered)}]`
       );
       if (videoWireadoRef.current !== v) {
         videoWireadoRef.current = v;
@@ -170,7 +186,7 @@ export function DebugOverlay() {
         DEBUG — toque 5x na versão pra desligar
       </div>
       {videoInfo && (
-        <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all" }}>
+        <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all", whiteSpace: "pre-line" }}>
           vídeo: {videoInfo}
         </div>
       )}
