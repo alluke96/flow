@@ -66,7 +66,6 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ t: number } | null>(null);
   const draggingRef = useRef(false);
   const dragPctRef = useRef<number | null>(null);
@@ -138,7 +137,6 @@ export function VideoPlayer({
     showOverlay();
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current);
     };
   }, [showOverlay]);
 
@@ -337,9 +335,16 @@ export function VideoPlayer({
       : false;
   }
 
+  // Clicar/tocar no vídeo em si NÃO alterna play/pause — só o botão
+  // dedicado (.player-center) faz isso. Um toque na área do vídeo era fácil
+  // demais de disparar sem querer (segurar o celular, um duplo-toque que
+  // "vazava" um toque simples primeiro, etc.), e cada vez que isso
+  // acontecia bem no meio de outra coisa (uma troca de rota, por exemplo)
+  // era mais uma chance de esbarrar na classe de bug do botão de voltar que
+  // já perseguimos várias vezes nesta base de código. Só acorda os
+  // controles (showOverlay) — bem mais previsível.
   function handleVideoAreaClick(e: React.MouseEvent) {
     if (isControlTarget(e.target)) return;
-    togglePlay();
     showOverlay();
   }
 
@@ -349,13 +354,16 @@ export function VideoPlayer({
     if (!touch) return;
     e.preventDefault();
 
+    // Acorda os controles na hora, sem esperar pra ver se vira duplo-toque
+    // — não tem mais nada pra "desambiguar" aqui (o toque simples não faz
+    // mais nada além disso), então não tem por que atrasar. O duplo-toque
+    // (abaixo) já acorda os controles de novo por conta própria (via
+    // seekBy), sem problema nenhum em chamar showOverlay() duas vezes.
+    showOverlay();
+
     const now = Date.now();
     const last = lastTapRef.current;
     if (last && now - last.t < DOUBLE_TAP_MS) {
-      if (singleTapTimerRef.current) {
-        clearTimeout(singleTapTimerRef.current);
-        singleTapTimerRef.current = null;
-      }
       lastTapRef.current = null;
       const half = window.innerWidth / 2;
       const isLeft = touch.clientX < half;
@@ -364,11 +372,6 @@ export function VideoPlayer({
       setSeekFlash({ dir: isLeft ? "back" : "fwd", id: seekFlashIdRef.current });
     } else {
       lastTapRef.current = { t: now };
-      singleTapTimerRef.current = setTimeout(() => {
-        togglePlay();
-        showOverlay();
-        lastTapRef.current = null;
-      }, DOUBLE_TAP_MS);
     }
   }
 
