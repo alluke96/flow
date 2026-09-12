@@ -11,66 +11,92 @@ export function bufferToStream(buf: Uint8Array): ReadableStream<Uint8Array> {
 /**
  * Converte uma stream Node (a que a googleapis devolve) pra Web Streams.
  *
- * NÃO usa Readable.toWeb: essa função embutida do Node tem uma corrida de
- * verdade entre o consumidor cancelando a stream (o navegador aborta um
- * range request em andamento — completamente normal, acontece a cada seek,
- * já que um novo range request cancela o anterior) e a stream de origem
- * terminando sozinha ao mesmo tempo — os dois tentam fechar o MESMO
- * controller, e quem perde a corrida lança "Invalid state: Controller is
- * already closed". Isso acontecia DE VERDADE em produção (self-host, ver
- * flow.log) como uma uncaughtException fora do try/catch da rota — corrompe
- * os bytes do vídeo entregues até ali, e o <video> reporta isso como
- * "formato não suportado" (MediaError code 4), parecendo um problema de
- * codec quando na real é essa corrida.
+ * DOIS requisitos, e a versão anterior só atendia um:
  *
- * Esta versão rastreia o estado ela mesma (uma flag local) e trata
- * cancel()/erro/fim concorrentes como o que são — eventos normais de
- * streaming, nunca uma exceção não tratada.
+ * 1) BACKPRESSURE (é o que estava faltando e quebrou o streaming). Só
+ *    registrar um listener de "data" coloca a stream Node em modo fluente:
+ *    ela lê do Drive o mais rápido que conseguir e empurra TUDO pro
+ *    controller, ignorando `desiredSize` — ou seja, um arquivo de 350 MB
+ *    era baixado inteiro pra memória do servidor a toda velocidade, mesmo
+ *    que o navegador estivesse consumindo devagar. Isso satura o processo
+ *    justamente enquanto ele deveria estar respondendo OUTRO range request.
+ *
+ *    Isso castiga .mkv muito mais que .mp4, e o motivo é estrutural: o
+ *    índice de um MP4 "faststart" fica no COMEÇO do arquivo (dá pra
+ *    conferir: ftyp seguido de moov logo nos primeiros bytes), então um
+ *    request sequencial basta. Já o índice do Matroska (Cues) costuma ficar
+ *    no FIM, então o navegador precisa de um segundo range request lá no
+ *    final antes de conseguir tocar/buscar qualquer coisa. Com a origem
+ *    despejando o arquivo inteiro sem freio, esse segundo request fica
+ *    disputando espaço com a mangueira aberta — o navegador não recebe o
+ *    índice a tempo e desiste, reportando como "formato não suportado".
+ *    `Readable.toWeb` (que estava aqui antes) fazia backpressure certo; a
+ *    substituição não fazia.
+ *
+ * 2) Não explodir numa corrida de fechamento. Cancelar (o navegador aborta
+ *    um range request pra fazer outro — normal a cada seek) pode coincidir
+ *    com a origem terminando sozinha, e os dois tentam fechar o mesmo
+ *    controller: "Invalid state: Controller is already closed", que
+ *    aparecia como uncaughtException no flow.log. Por isso o estado é
+ *    rastreado aqui e toda chamada ao controller é protegida.
  */
 export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uint8Array> {
   let closed = false;
+  const source = node as NodeJS.ReadableStream & {
+    pause?(): void;
+    resume?(): void;
+    destroy?(): void;
+  };
 
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      function finish(fn: () => void) {
-        if (closed) return;
+  return new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        function finish(fn: () => void) {
+          if (closed) return;
+          closed = true;
+          try {
+            fn();
+          } catch {
+            // O consumidor pode ter cancelado bem nesse instante (ver
+            // cancel() abaixo) — o controller já fechou por esse caminho.
+          }
+        }
+
+        node.on("data", (chunk: Buffer) => {
+          if (closed) return;
+          try {
+            controller.enqueue(new Uint8Array(chunk));
+          } catch {
+            // Corrida com um cancel concorrente: descarta o chunk.
+            return;
+          }
+          // Fila do consumidor cheia: para de puxar da origem até ele pedir
+          // mais (ver pull). É isto que impede o arquivo inteiro de ser
+          // baixado de uma vez.
+          if ((controller.desiredSize ?? 1) <= 0) source.pause?.();
+        });
+        node.on("end", () => finish(() => controller.close()));
+        node.on("error", (err) => finish(() => controller.error(err)));
+        // 'close' pode vir depois de 'end'/'error' (não é erro por si só).
+        node.on("close", () => finish(() => controller.close()));
+      },
+      pull() {
+        // O consumidor quer mais bytes: volta a puxar da origem.
+        if (!closed) source.resume?.();
+      },
+      cancel() {
+        // O navegador abortou este range request (caso comum: seek). É
+        // normal — marca fechado e destrói a origem pra não seguir baixando
+        // do Drive à toa.
         closed = true;
-        try {
-          fn();
-        } catch {
-          // O consumidor pode ter cancelado bem nesse instante (ver
-          // cancel() abaixo) — o controller já fechou por esse caminho,
-          // não há nada a fazer aqui.
-        }
-      }
-
-      node.on("data", (chunk: Buffer) => {
-        if (closed) return;
-        try {
-          controller.enqueue(new Uint8Array(chunk));
-        } catch {
-          // Mesma corrida, do lado do enqueue: consumidor cancelou entre o
-          // `if (closed)` acima e esta chamada. Descarta o chunk, sem
-          // problema — a stream já era.
-        }
-      });
-      node.on("end", () => finish(() => controller.close()));
-      node.on("error", (err) => finish(() => controller.error(err)));
-      // 'close' pode disparar depois de 'end'/'error' (não é erro por si
-      // só) — só faz algo se nenhum dos outros dois já tiver fechado.
-      node.on("close", () => finish(() => controller.close()));
+        source.destroy?.();
+      },
     },
-    cancel() {
-      // O consumidor (a resposta HTTP) cancelou — o navegador abortou este
-      // range request pra fazer outro (o caso comum: seek). Isso É normal
-      // durante streaming de vídeo. Marca fechado (qualquer callback
-      // pendente vira no-op) e destrói a stream de origem, pra não
-      // continuar baixando do Drive à toa.
-      closed = true;
-      const destroyable = node as NodeJS.ReadableStream & { destroy?: () => void };
-      destroyable.destroy?.();
-    },
-  });
+    // ~16 chunks (o Node entrega ~64 KB cada) de folga antes de frear: o
+    // suficiente pra não ficar pausando/retomando a cada chunk, longe de
+    // "carrega o arquivo todo".
+    { highWaterMark: 16 }
+  );
 }
 
 /** Faz o parse de um header `Range: bytes=start-end`. Retorna null se ausente/ inválido. */
