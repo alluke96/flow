@@ -112,29 +112,23 @@ export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uin
   );
 }
 
-/** Faz o parse de um header `Range: bytes=start-end`. Retorna null se ausente/ inválido. */
-// Nenhuma resposta de range promete mais que isto de uma vez, mesmo que o
-// cliente peça "bytes=0-" (sem fim, "me manda o arquivo inteiro"). É um
-// limite ausente que os logs do self-host expuseram: um pedido assim para
-// um filme de 330MB virava UMA ÚNICA resposta 206 prometendo o arquivo
-// inteiro numa conexão só — e nenhum pedido novo aparecia no log quando o
-// usuário tentava avançar 10s na TV. Um cliente que não sabe (ou não
-// consegue, por algum motivo específico daquele navegador) cancelar essa
-// conexão aberta e abrir outra pro trecho certo fica PRESO nela: só
-// consegue tocar o que for chegando sequencialmente, então buscar pra
-// frente parece "não fazer nada" (a posição só avança de verdade quando o
-// download sequencial finalmente alcança ali).
-//
-// Limitando cada resposta a um pedaço, TODO cliente — mesmo um que nunca
-// cancela nada sozinho — é obrigado a pedir de novo periodicamente pra
-// continuar recebendo dados. É nesse pedido novo que uma busca vira, na
-// prática, um Range request pro offset certo. 16 MiB é um meio-termo: dá
-// ~140s de vídeo num bitrate baixo (o filme do log, ~116KB/s) e ainda uns
-// 16s num bitrate alto (~1MB/s) — raro demais pra virar gargalo (cada
-// abertura no Drive levou uns 600-1000ms nos logs), frequente o
-// suficiente pra nunca deixar uma busca de verdade presa atrás dele.
-const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
-
+/**
+ * Faz o parse de um header `Range: bytes=start-end`. Retorna null se
+ * ausente/inválido.
+ *
+ * A v0.1.38 limitava cada resposta a 16 MiB, mesmo quando o cliente pedia
+ * o arquivo inteiro — a teoria era forçar qualquer cliente a pedir de
+ * novo periodicamente. Revertido: os logs do overlay de debug na TV real
+ * mostraram que essa TV, ao terminar de receber os bytes que uma resposta
+ * prometeu, trata a conexão fechada como "acabou o vídeo" — nunca chega a
+ * pedir mais. Resultado: qualquer vídeo tocado nela cortava por volta dos
+ * ~2-3 minutos (o quanto 16 MiB dura no bitrate dela) e pulava pro
+ * próximo episódio sozinho — um jeito bem pior de quebrar do que o
+ * problema original de busca, que essa mudança nem chegou a resolver
+ * (a mesma leitura confirmou `seekable` correto o vídeo inteiro; o
+ * problema real é outro, ver seekBy/handleLoadedMetadata em
+ * VideoPlayer.tsx).
+ */
 export function parseRangeHeader(
   headerValue: string | null,
   totalSize: number
@@ -160,5 +154,5 @@ export function parseRangeHeader(
   }
 
   if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || start > end) return null;
-  return { start, end: Math.min(end, totalSize - 1, start + MAX_CHUNK_BYTES - 1) };
+  return { start, end: Math.min(end, totalSize - 1) };
 }
