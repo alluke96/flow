@@ -1,3 +1,5 @@
+import { horaLog } from "@/lib/log";
+
 /** Envolve um Buffer/Uint8Array já em memória num ReadableStream (Web Streams). */
 export function bufferToStream(buf: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -85,7 +87,7 @@ export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uin
         // nada". `bytes` na mensagem ajuda a diferenciar "nem começou a
         // baixar" de "caiu no meio".
         node.on("error", (err) => {
-          console.error(`[stream] origem (Drive) falhou depois de ${bytes} bytes:`, err);
+          console.error(`[${horaLog()}] [stream] origem (Drive) falhou depois de ${bytes} bytes:`, err);
           finish(() => controller.error(err));
         });
         // 'close' pode vir depois de 'end'/'error' (não é erro por si só).
@@ -111,6 +113,28 @@ export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uin
 }
 
 /** Faz o parse de um header `Range: bytes=start-end`. Retorna null se ausente/ inválido. */
+// Nenhuma resposta de range promete mais que isto de uma vez, mesmo que o
+// cliente peça "bytes=0-" (sem fim, "me manda o arquivo inteiro"). É um
+// limite ausente que os logs do self-host expuseram: um pedido assim para
+// um filme de 330MB virava UMA ÚNICA resposta 206 prometendo o arquivo
+// inteiro numa conexão só — e nenhum pedido novo aparecia no log quando o
+// usuário tentava avançar 10s na TV. Um cliente que não sabe (ou não
+// consegue, por algum motivo específico daquele navegador) cancelar essa
+// conexão aberta e abrir outra pro trecho certo fica PRESO nela: só
+// consegue tocar o que for chegando sequencialmente, então buscar pra
+// frente parece "não fazer nada" (a posição só avança de verdade quando o
+// download sequencial finalmente alcança ali).
+//
+// Limitando cada resposta a um pedaço, TODO cliente — mesmo um que nunca
+// cancela nada sozinho — é obrigado a pedir de novo periodicamente pra
+// continuar recebendo dados. É nesse pedido novo que uma busca vira, na
+// prática, um Range request pro offset certo. 16 MiB é um meio-termo: dá
+// ~140s de vídeo num bitrate baixo (o filme do log, ~116KB/s) e ainda uns
+// 16s num bitrate alto (~1MB/s) — raro demais pra virar gargalo (cada
+// abertura no Drive levou uns 600-1000ms nos logs), frequente o
+// suficiente pra nunca deixar uma busca de verdade presa atrás dele.
+const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
+
 export function parseRangeHeader(
   headerValue: string | null,
   totalSize: number
@@ -136,5 +160,5 @@ export function parseRangeHeader(
   }
 
   if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || start > end) return null;
-  return { start, end: Math.min(end, totalSize - 1) };
+  return { start, end: Math.min(end, totalSize - 1, start + MAX_CHUNK_BYTES - 1) };
 }

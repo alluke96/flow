@@ -2,6 +2,7 @@ import { getDriveClient } from "@/lib/drive/client";
 import { buildDriveIndex, type DriveIndex } from "@/lib/drive/scan";
 import { cached, invalidateCached } from "@/lib/cache";
 import { nodeToWebStream, parseRangeHeader } from "@/lib/stream-utils";
+import { horaLog } from "@/lib/log";
 import type { CatalogSource, FileRange, OpenResult } from "./types";
 
 const CATALOG_CACHE_KEY = "drive:catalog-index";
@@ -33,7 +34,9 @@ async function fetchDriveRange(
     { fileId, alt: "media" },
     { responseType: "stream", headers }
   );
-  console.log(`[drive] range aberto pra ${fileId} (${headers.Range ?? "arquivo inteiro"}) em ${Date.now() - inicio}ms`);
+  console.log(
+    `[${horaLog()}] [drive] range aberto pra ${fileId} (${headers.Range ?? "arquivo inteiro"}) em ${Date.now() - inicio}ms`
+  );
 
   const status = range ? 206 : 200;
   const contentLength = range ? range.end - range.start + 1 : totalSize;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCatalogSource } from "@/lib/catalog-source";
 import { episodeIdSchema, titleIdSchema } from "@/lib/validation";
+import { horaLog } from "@/lib/log";
 
 // A googleapis usa APIs do Node (streams, auth) — roda sempre no runtime Node,
 // nunca no Edge.
@@ -34,7 +35,7 @@ export async function GET(
   // que falha silenciosamente (o navegador só volta pra posição anterior,
   // sem erro visível nenhum) não deixava rastro nenhum aqui.
   const inicio = Date.now();
-  console.log(`[stream] pedido ${idResult.data} ep=${episodeParam ?? "-"} range=${rangeHeader ?? "-"}`);
+  console.log(`[${horaLog()}] [stream] pedido ${idResult.data} ep=${episodeParam ?? "-"} range=${rangeHeader ?? "-"}`);
 
   // openVideo valida internamente que `id`/`ep` existem no catálogo
   // conhecido antes de tocar em qualquer credencial/fileId do Drive — é
@@ -49,11 +50,11 @@ export async function GET(
   try {
     result = await source.openVideo(idResult.data, episodeParam, rangeHeader);
   } catch (err) {
-    console.error(`[stream] falha ao abrir vídeo ${idResult.data} (ep=${episodeParam}):`, err);
+    console.error(`[${horaLog()}] [stream] falha ao abrir vídeo ${idResult.data} (ep=${episodeParam}):`, err);
     return NextResponse.json({ error: "falha ao abrir o vídeo" }, { status: 500 });
   }
   if (!result) {
-    console.error(`[stream] vídeo não encontrado: ${idResult.data} (ep=${episodeParam})`);
+    console.error(`[${horaLog()}] [stream] vídeo não encontrado: ${idResult.data} (ep=${episodeParam})`);
     return NextResponse.json({ error: "vídeo não encontrado" }, { status: 404 });
   }
 
@@ -72,7 +73,7 @@ export async function GET(
   }
 
   console.log(
-    `[stream] resposta ${idResult.data}: status=${result.status}` +
+    `[${horaLog()}] [stream] resposta ${idResult.data}: status=${result.status}` +
       ` ${headers["Content-Range"] ?? "(sem range)"} (abriu em ${Date.now() - inicio}ms)`
   );
 

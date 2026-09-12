@@ -48,8 +48,11 @@ const OVERLAY_HIDE_MS = 3200;
 const DOUBLE_TAP_MS = 320;
 // Teto pra esperar o "seeked" do seek de retomada antes de dar play assim
 // mesmo (ver handleLoadedMetadata) — nunca deixa o player travado esperando
-// um evento que pode não vir.
-const RESUME_SEEK_TIMEOUT_MS = 1500;
+// um evento que pode não vir. 3000ms (era 1500) porque agora cabe uma
+// SEGUNDA tentativa aqui dentro (ver "pousouLonge"/tentouDeNovo) se a
+// primeira busca cair no lugar errado — cada tentativa pode precisar de um
+// round-trip de rede novo pro Drive (~600-1000ms, pelos logs de streaming).
+const RESUME_SEEK_TIMEOUT_MS = 3000;
 const NEXT_EPISODE_COUNTDOWN_S = 5;
 
 /**
@@ -270,14 +273,37 @@ export function VideoPlayer({
       // relógio fica congelado no destino, e a tela fica preta. Um fallback
       // curto garante que a reprodução comece de um jeito ou de outro.
       let started = false;
+      let tentouDeNovo = false;
       let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
       function startOnce() {
         if (started) return;
+
+        // "seeked" disparar não é garantia de que a busca pousou onde
+        // pedimos. Os logs de streaming (ver stream-utils.ts) mostraram
+        // buscas grandes voltando pra perto de onde já estavam MESMO
+        // disparando "seeked" normalmente — provavelmente o request pelo
+        // trecho novo não completou a tempo e o navegador desistiu
+        // sozinho. Sem checar isso aqui, "continuar assistindo" às vezes
+        // recomeçava do zero sem avisar nada (o "fica preto, áudio começa
+        // do 0" relatado antes pode muito bem ter sido exatamente isto).
+        // Tenta a busca de novo, uma vez só, antes de aceitar onde caiu —
+        // nunca mais que isso, pra não arriscar travar esperando pra
+        // sempre se a rede estiver mesmo ruim.
+        const atual = videoRef.current;
+        const pousouLonge = atual && Math.abs(atual.currentTime - initialTime) > 5;
+        if (pousouLonge && !tentouDeNovo) {
+          tentouDeNovo = true;
+          atual.currentTime = initialTime;
+          return;
+        }
+
         started = true;
         if (fallbackTimer) clearTimeout(fallbackTimer);
         videoRef.current?.removeEventListener("seeked", startOnce);
         startPlayback();
       }
+      // Mais folga que antes (era 1500ms): uma tentativa extra de busca
+      // precisa de espaço pra um SEGUNDO round-trip de rede, não só um.
       fallbackTimer = setTimeout(startOnce, RESUME_SEEK_TIMEOUT_MS);
       v.addEventListener("seeked", startOnce);
       v.currentTime = initialTime;
