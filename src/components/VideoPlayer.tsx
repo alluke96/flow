@@ -109,6 +109,13 @@ export function VideoPlayer({
   // Enquanto tem próximo episódio, o fim do vídeo arma essa contagem em
   // vez de já disparar onNextEpisode — dá pra cancelar e ficar aqui.
   const [nextCountdown, setNextCountdown] = useState<number | null>(null);
+  // Feedback visual do duplo-toque pra buscar ±10s (estilo YouTube) — sem
+  // isso, o seek era seco demais: nada na tela indicava que o duplo-toque
+  // tinha sido reconhecido, só o tempo pulando. `id` incrementa a cada
+  // duplo-toque, mesmo repetido do mesmo lado — é a troca de `key` no JSX
+  // (ver render) que reinicia a animação CSS a cada vez.
+  const [seekFlash, setSeekFlash] = useState<{ dir: "back" | "fwd"; id: number } | null>(null);
+  const seekFlashIdRef = useRef(0);
 
   const src = streamUrl(titleId, episodeId);
 
@@ -196,6 +203,14 @@ export function VideoPlayer({
     }, 5000);
     return () => clearInterval(interval);
   }, [doSaveProgress]);
+
+  // Some sozinho depois de tocar a animação (ver .seek-flash no CSS) — tem
+  // que bater com a duração dela.
+  useEffect(() => {
+    if (!seekFlash) return;
+    const t = setTimeout(() => setSeekFlash(null), 700);
+    return () => clearTimeout(t);
+  }, [seekFlash]);
 
   useEffect(() => {
     // Captura o nó agora (continua válido até o desmonte de verdade) pra
@@ -343,7 +358,10 @@ export function VideoPlayer({
       }
       lastTapRef.current = null;
       const half = window.innerWidth / 2;
-      seekBy(touch.clientX < half ? -10 : 10);
+      const isLeft = touch.clientX < half;
+      seekBy(isLeft ? -10 : 10);
+      seekFlashIdRef.current += 1;
+      setSeekFlash({ dir: isLeft ? "back" : "fwd", id: seekFlashIdRef.current });
     } else {
       lastTapRef.current = { t: now };
       singleTapTimerRef.current = setTimeout(() => {
@@ -610,6 +628,20 @@ export function VideoPlayer({
           setPlaybackError(true);
         }}
       />
+
+      {/* Independente de .player-overlay/controls-hidden de propósito — o
+          feedback do seek tem que aparecer mesmo se os controles já
+          sumiram por inatividade (é bem comum dar duplo-toque justo
+          quando eles estão escondidos). pointer-events:none no CSS: nunca
+          deve atrapalhar nenhum toque por baixo. */}
+      {seekFlash && (
+        <div key={seekFlash.id} className={`seek-flash seek-flash-${seekFlash.dir}`}>
+          <div className="seek-flash-badge">
+            {seekFlash.dir === "back" ? <Back10Icon /> : <Forward10Icon />}
+            <span>10 segundos</span>
+          </div>
+        </div>
+      )}
 
       {/* Fica fora da camada que soma opacity+pointer-events com o resto dos
           controles (.player-overlay) — mas ainda assim SOME visualmente
