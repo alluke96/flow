@@ -124,43 +124,6 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     goTo(dx < 0 ? 1 : -1);
   }
 
-  // Texto (título/sinopse/botões) crossfada junto com a imagem, na mesma
-  // duração/curva — em vez do texto trocar na hora (troca de `key` derruba
-  // o bloco antigo instantaneamente, é assim que ele volta a animar a cada
-  // slide) enquanto só a imagem some aos poucos por baixo. Essa mistura de
-  // "texto corta, imagem esmaece" era boa parte do carrossel nunca parecer
-  // suave de verdade. `prevTitle` (mesmo estado que já controla a camada de
-  // imagem antiga) também controla a camada de texto antiga; o texto novo
-  // sempre existe e sempre é o interativo — o antigo é só decoração
-  // enquanto esmaece, por isso pointer-events:none nele.
-  function renderContent(t: TitleSummary, isPrev: boolean) {
-    const progress = isPrev ? Boolean(getProgress(t.id)) : hasProgress;
-    return (
-      <div
-        key={`${t.id}-content${isPrev ? "-prev" : ""}`}
-        className={`hero-content${isPrev ? " hero-content-prev" : " hero-content-current"}`}
-      >
-        <h1 className="hero-title">{t.titulo}</h1>
-        <div className="hero-meta">{metaLine(t)}</div>
-        <p className="hero-desc">{t.sinopse}</p>
-        <div className="hero-actions">
-          <button className="btn-hero play" onClick={isPrev ? undefined : handlePlay} tabIndex={isPrev ? -1 : 0}>
-            ▶ {progress ? "Continuar assistindo" : "Assistir"}
-          </button>
-          <Link
-            href={`/title/${t.id}`}
-            className="btn-hero info"
-            tabIndex={isPrev ? -1 : 0}
-            aria-hidden={isPrev}
-          >
-            ⓘ Detalhes
-          </Link>
-        </div>
-        {!isPrev && unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
-      </div>
-    );
-  }
-
   return (
     <div className="hero" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {prevTitle && (
@@ -175,8 +138,25 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
         style={{ backgroundImage: `url('${bannerUrl(title.id)}')` }}
       />
       <div className="hero-fade" />
-      {prevTitle && renderContent(prevTitle, true)}
-      {renderContent(title, false)}
+      {/* Ao contrário da imagem, o texto NÃO crossfada com o anterior — duas
+          fotos se misturando fica natural, dois blocos de texto sobrepostos
+          no mesmo lugar (títulos/sinopses de tamanhos diferentes) só parece
+          embaralhado. Troca de `key` derruba o bloco antigo na hora e o novo
+          entra deslizando de baixo pra cima, sem sobreposição. */}
+      <div key={`${title.id}-content`} className="hero-content">
+        <h1 className="hero-title">{title.titulo}</h1>
+        <div className="hero-meta">{metaLine(title)}</div>
+        <p className="hero-desc">{title.sinopse}</p>
+        <div className="hero-actions">
+          <button className="btn-hero play" onClick={handlePlay}>
+            ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
+          </button>
+          <Link href={`/title/${title.id}`} className="btn-hero info">
+            ⓘ Detalhes
+          </Link>
+        </div>
+        {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
+      </div>
     </div>
   );
 }
