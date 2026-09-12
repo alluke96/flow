@@ -381,6 +381,12 @@ export function VideoPlayer({
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const isFormControl = tag ? ["BUTTON", "SELECT", "INPUT"].includes(tag) : false;
+      // A barra de progresso (role="slider", uma <div>, não pega no check
+      // de tag acima) tem seu próprio onKeyDown (handleProgressKeyDown,
+      // ±5s) — sem essa exclusão aqui, focar nela e apertar seta disparava
+      // OS DOIS handlers pro mesmo tecla (±5 daqui, ±10 do handler global
+      // logo abaixo), somando 15s por vez em vez de avançar do jeito certo.
+      const isSlider = target?.getAttribute("role") === "slider";
       // A barra de espaço sempre alterna play/pause, mesmo com um botão do
       // player focado (ex: acabou de clicar em mudo/tela cheia/±10s) — só
       // fica de fora quando o foco está de verdade num campo de formulário
@@ -393,9 +399,9 @@ export function VideoPlayer({
         e.preventDefault();
         togglePlay();
         showOverlay();
-      } else if (e.key === "ArrowRight" && !isFormControl) {
+      } else if (e.key === "ArrowRight" && !isFormControl && !isSlider) {
         seekBy(10);
-      } else if (e.key === "ArrowLeft" && !isFormControl) {
+      } else if (e.key === "ArrowLeft" && !isFormControl && !isSlider) {
         seekBy(-10);
       } else if (e.key === "Escape" || e.keyCode === 10009) {
         // 10009 = physical "Return"/back button on Samsung TV remotes

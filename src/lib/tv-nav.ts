@@ -15,9 +15,15 @@ import { useEffect } from "react";
  * layout — works on the browse grid, hero, title detail, profile screen,
  * anywhere, with zero per-page wiring.
  *
- * Skipped entirely while the video player is open: VideoPlayer already has
- * its own, more specific keyboard scheme (arrows = seek ±10s, space =
- * play/pause, Escape = exit) that would conflict with focus-jumping.
+ * Left/Right and the back key are skipped entirely while the video player
+ * is open: VideoPlayer already has its own, more specific handling for them
+ * (arrows = seek ±10s or adjust whatever control is focused, Escape/back =
+ * exit) that would conflict with focus-jumping or global history.back().
+ * Up/Down are NOT claimed by VideoPlayer at all, so they're left enabled
+ * even inside the player — that's the only way to reach the progress bar,
+ * volume, fullscreen etc. with a D-pad in the first place (there's no
+ * Tab-equivalent on a TV remote): Down from the center controls reaches the
+ * progress bar, Up goes back, same geometry-based logic as everywhere else.
  *
  * TIZEN_BACK_KEYCODE is the physical "Return" button on Samsung remotes
  * (not the same as Escape) — falls back to browser history.back(), which
@@ -114,10 +120,10 @@ const ARROW_DIRECTIONS: Record<string, "up" | "down" | "left" | "right"> = {
 export function useTVNav() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // VideoPlayer owns keyboard input while open (seek/play/pause/exit).
-      if (document.querySelector(".player-shell")) return;
+      const inPlayer = Boolean(document.querySelector(".player-shell"));
 
       if (e.keyCode === TIZEN_BACK_KEYCODE) {
+        if (inPlayer) return; // VideoPlayer's own onKeyDown handles this.
         e.preventDefault();
         window.history.back();
         return;
@@ -125,6 +131,9 @@ export function useTVNav() {
 
       const direction = ARROW_DIRECTIONS[e.key];
       if (!direction) return;
+      // Left/Right belong entirely to VideoPlayer's own scheme while it's
+      // open (global seek, or whatever control currently has focus).
+      if (inPlayer && (direction === "left" || direction === "right")) return;
       if (moveFocus(direction)) e.preventDefault();
     }
 

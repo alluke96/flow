@@ -968,6 +968,13 @@ a {
   height: 32px;
   touch-action: none;
 }
+/* Focado via teclado/controle remoto (ver handleProgressKeyDown — agora
+   alcançável pelo D-pad, ver tv-nav.ts): o contorno genérico de foco fica
+   estranho numa barra fininha de 32px — a bolinha aumentando (mesmo
+   tratamento do hover/drag, ver .progress-handle) já é o indicador visual. */
+.progress-bar:focus-visible {
+  outline: none;
+}
 .progress-track {
   position: absolute;
   left: 0;
@@ -1009,7 +1016,8 @@ a {
   box-shadow: 0 0 0 0 rgba(255, 69, 58, 0);
 }
 .progress-bar:hover .progress-handle,
-.progress-bar.dragging .progress-handle {
+.progress-bar.dragging .progress-handle,
+.progress-bar:focus-visible .progress-handle {
   transform: translate(-50%, -50%) scale(1.35);
   box-shadow: 0 0 0 6px rgba(255, 69, 58, 0.18);
 }
