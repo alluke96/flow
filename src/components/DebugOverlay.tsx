@@ -14,7 +14,7 @@ interface LogEntry {
 // unificado) porque não sabemos de antemão qual deles a TV usa pra
 // simular o clique — é exatamente essa incerteza que este overlay existe
 // pra resolver com dado real, em vez de mais suposição.
-const EVENTOS = [
+const EVENTOS_DOCUMENTO = [
   "pointerdown",
   "pointerup",
   "mousedown",
@@ -23,6 +23,22 @@ const EVENTOS = [
   "touchstart",
   "touchend",
   "keydown",
+] as const;
+
+// Eventos do próprio <video> que revelam o que acontece com a BUSCA em si
+// (não com o clique que a pede). Ficam de fora de EVENTOS_DOCUMENTO de
+// propósito: media events como "waiting"/"stalled"/"seeking" NÃO sobem
+// (bubble) pro document — escutar só lá em cima nunca os pegaria, custe o
+// que custar de capture. Precisam de listener direto no elemento.
+const EVENTOS_VIDEO = [
+  "seeking",
+  "seeked",
+  "waiting",
+  "stalled",
+  "suspend",
+  "abort",
+  "error",
+  "canplay",
 ] as const;
 
 function descreverAlvo(el: EventTarget | null): string {
@@ -46,7 +62,8 @@ function descreverAlvo(el: EventTarget | null): string {
 
 /**
  * Overlay de diagnóstico: mostra ao vivo, na própria tela, todo evento de
- * clique/toque/tecla que o navegador da TV realmente entrega ao app — sem
+ * clique/toque/tecla que o navegador da TV realmente entrega ao app, e o
+ * que acontece com o <video> em si (busca, travamento de rede) — sem
  * precisar de DevTools, que não dá pra abrir na TV.
  *
  * Ativa/desativa tocando 5x no número da versão (ver ProfileScreen). Só
@@ -55,6 +72,12 @@ function descreverAlvo(el: EventTarget | null): string {
  * stopPropagation — não muda em nada o funcionamento real do app, mesmo
  * ligado. `pointerEvents: none` garante que o quadro nem bloqueia cliques
  * por baixo dele.
+ *
+ * NÃO aparece durante o fullscreen NATIVO do <video> (webkitEnterFullscreen
+ * — ver toggleFullscreen em VideoPlayer.tsx): esse modo é uma camada de
+ * renderização separada do navegador, por cima de tudo, e nada do nosso
+ * DOM (overlay incluído) consegue aparecer ali. Se for testar isto, deixe
+ * o player no modo normal (sem fullscreen).
  */
 export function DebugOverlay() {
   const [on, setOn] = useState(false);
@@ -62,6 +85,7 @@ export function DebugOverlay() {
   const [videoInfo, setVideoInfo] = useState<string | null>(null);
   const idRef = useRef(0);
   const t0Ref = useRef(0);
+  const videoWireadoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     const sync = () => setOn(isDebugEnabled());
@@ -70,44 +94,54 @@ export function DebugOverlay() {
     return () => window.removeEventListener(EVENTO_MUDANCA, sync);
   }, []);
 
-  // Estado do <video> ao vivo. Existe pra não depender de perguntar "o
-  // número mudou?" depois — a foto do overlay já mostra a resposta: se
-  // currentTime pula ao apertar ±10s, mesmo que a imagem do vídeo pareça
-  // travada (rebuffer), o clique funcionou e o problema é outro (rede/
-  // decodificação); se currentTime NÃO muda, o clique não chegou a
-  // executar seekBy de verdade, apesar do :active "apertar" na tela.
   useEffect(() => {
     if (!on) return;
-    const t = setInterval(() => {
+    t0Ref.current = Date.now();
+
+    function push(type: string, alvo: string) {
+      idRef.current += 1;
+      setLog((prev) =>
+        [{ id: idRef.current, t: Date.now() - t0Ref.current, type, alvo }, ...prev].slice(0, 20)
+      );
+    }
+
+    function registrarDoc(e: Event) {
+      push(e.type, descreverAlvo(e.target));
+    }
+    for (const tipo of EVENTOS_DOCUMENTO) document.addEventListener(tipo, registrarDoc, { capture: true });
+
+    function registrarVideo(e: Event) {
+      const v = e.currentTarget as HTMLVideoElement;
+      push(e.type, `<video> t=${v.currentTime.toFixed(1)}`);
+    }
+
+    // Estado do <video> ao vivo (currentTime/duration/seeking/paused), e
+    // liga os listeners de EVENTOS_VIDEO assim que o elemento aparece —
+    // ele só existe depois de entrar no player, então precisa checar
+    // periodicamente em vez de uma vez só no mount deste componente.
+    const poll = setInterval(() => {
       const v = document.querySelector("video");
       if (!v) {
         setVideoInfo(null);
+        videoWireadoRef.current = null;
         return;
       }
       setVideoInfo(
         `t=${v.currentTime.toFixed(1)}/${v.duration ? v.duration.toFixed(1) : "?"}` +
           ` seeking=${v.seeking} paused=${v.paused} readyState=${v.readyState}`
       );
+      if (videoWireadoRef.current !== v) {
+        videoWireadoRef.current = v;
+        for (const tipo of EVENTOS_VIDEO) v.addEventListener(tipo, registrarVideo);
+      }
     }, 300);
-    return () => clearInterval(t);
-  }, [on]);
 
-  useEffect(() => {
-    if (!on) return;
-    t0Ref.current = Date.now();
-    function registrar(e: Event) {
-      idRef.current += 1;
-      const entrada: LogEntry = {
-        id: idRef.current,
-        t: Date.now() - t0Ref.current,
-        type: e.type,
-        alvo: descreverAlvo(e.target),
-      };
-      setLog((prev) => [entrada, ...prev].slice(0, 18));
-    }
-    for (const tipo of EVENTOS) document.addEventListener(tipo, registrar, { capture: true });
     return () => {
-      for (const tipo of EVENTOS) document.removeEventListener(tipo, registrar, { capture: true });
+      for (const tipo of EVENTOS_DOCUMENTO) document.removeEventListener(tipo, registrarDoc, { capture: true });
+      if (videoWireadoRef.current) {
+        for (const tipo of EVENTOS_VIDEO) videoWireadoRef.current.removeEventListener(tipo, registrarVideo);
+      }
+      clearInterval(poll);
     };
   }, [on]);
 

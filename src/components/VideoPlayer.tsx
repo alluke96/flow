@@ -510,20 +510,36 @@ export function VideoPlayer({
     const v = videoRef.current as WebkitVideoElement | null;
     if (!v) return;
 
-    // iOS Safari não implementa Fullscreen API padrão em elementos
-    // genéricos — só o próprio <video> sabe entrar em fullscreen, por uma
-    // API própria da Apple. Sem isso, o botão simplesmente não faz nada
-    // em iPhone/iPad.
-    if (v.webkitEnterFullscreen) {
-      if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen?.();
-      else v.webkitEnterFullscreen();
+    // Prioridade invertida de propósito: tenta SEMPRE a Fullscreen API
+    // padrão primeiro (no container, não no <video>), e só cai pro
+    // webkitEnterFullscreen do <video> quando o padrão nem existe.
+    //
+    // A versão anterior fazia o oposto — checava webkitEnterFullscreen
+    // primeiro — pensando só em iOS Safari (que de fato não implementa
+    // Fullscreen API padrão em elemento genérico nenhum, só o <video> tem
+    // essa API própria da Apple). O problema: o WebKit antigo de TVs
+    // Tizen TAMBÉM expõe webkitEnterFullscreen no <video>, então o app
+    // pegava esse caminho lá também — e nesse modo o NAVEGADOR assume um
+    // player nativo próprio por cima do vídeo, com os controles dele, não
+    // os nossos. Foi assim que sumiram os botões ±10s, a barra de
+    // progresso e (o que interessa pro diagnóstico) o overlay de debug:
+    // webkitEnterFullscreen troca pra uma camada de renderização separada
+    // que cobre a página inteira, então nada do nosso DOM aparece mais
+    // por cima. Checando requestFullscreen no container primeiro, a TV
+    // (que TEM a API padrão, só também tem a antiga) fica com os nossos
+    // próprios controles — e o iOS, que não tem requestFullscreen em
+    // elemento genérico, cai pro webkitEnterFullscreen do jeito de sempre.
+    const container = v.closest(".player-shell");
+    if (container instanceof HTMLElement && typeof container.requestFullscreen === "function") {
+      if (!document.fullscreenElement) container.requestFullscreen().catch(() => {});
+      else document.exitFullscreen();
       return;
     }
 
-    const container = v.closest(".player-shell");
-    if (!(container instanceof HTMLElement)) return;
-    if (!document.fullscreenElement) container.requestFullscreen().catch(() => {});
-    else document.exitFullscreen();
+    if (v.webkitEnterFullscreen) {
+      if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen?.();
+      else v.webkitEnterFullscreen();
+    }
   }
 
   const [isFullscreen, setIsFullscreen] = useState(false);
