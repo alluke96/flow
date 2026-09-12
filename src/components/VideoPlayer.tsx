@@ -418,28 +418,29 @@ export function VideoPlayer({
 
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      const isFormControl = tag ? ["BUTTON", "SELECT", "INPUT"].includes(tag) : false;
       // A barra de progresso (role="slider", uma <div>, não pega no check
-      // de tag acima) tem seu próprio onKeyDown (handleProgressKeyDown,
+      // de tag abaixo) tem seu próprio onKeyDown (handleProgressKeyDown,
       // ±5s) — sem essa exclusão aqui, focar nela e apertar seta disparava
       // OS DOIS handlers pro mesmo tecla (±5 daqui, ±10 do handler global
       // logo abaixo), somando 15s por vez em vez de avançar do jeito certo.
       const isSlider = target?.getAttribute("role") === "slider";
-      // A barra de espaço sempre alterna play/pause, mesmo com um botão do
-      // player focado (ex: acabou de clicar em mudo/tela cheia/±10s) — só
-      // fica de fora quando o foco está de verdade num campo de formulário
-      // com uso próprio pra espaço (o <select> de velocidade, o slider de
-      // volume). Sem isso, apertar espaço depois de clicar em qualquer
-      // outro botão só reativava ELE de novo (comportamento nativo do
-      // navegador pra botão focado), nunca tocava/pausava o vídeo.
+      // Só exclui campos com uso NATIVO próprio pra seta (o <select> de
+      // velocidade navega opções, o <input type=range> do volume muda de
+      // valor) — um <button> comum (play/pause, ±10s, mudo, tela cheia...)
+      // não tem comportamento nativo pra seta nenhum, então não deveria
+      // bloquear o seek global. Isso importa de verdade num controle de TV:
+      // sem mouse, o D-pad só alcança ±10s/±5s FOCANDO um botão primeiro
+      // (ver tv-nav.ts) — excluir BUTTON aqui deixava ArrowLeft/Right sem
+      // efeito nenhum sempre que o foco estivesse em qualquer botão do
+      // player, ou seja, na prática o tempo todo no controle remoto.
       const isRealFormControl = tag === "SELECT" || tag === "INPUT";
       if ((e.key === " " || e.code === "Space") && !isRealFormControl) {
         e.preventDefault();
         togglePlay();
         showOverlay();
-      } else if (e.key === "ArrowRight" && !isFormControl && !isSlider) {
+      } else if (e.key === "ArrowRight" && !isRealFormControl && !isSlider) {
         seekBy(10);
-      } else if (e.key === "ArrowLeft" && !isFormControl && !isSlider) {
+      } else if (e.key === "ArrowLeft" && !isRealFormControl && !isSlider) {
         seekBy(-10);
       } else if (e.key === "Escape" || e.keyCode === 10009) {
         // 10009 = physical "Return"/back button on Samsung TV remotes

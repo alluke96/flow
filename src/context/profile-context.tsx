@@ -9,52 +9,78 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Profile, ProfileStore, WatchProgress } from "@/types/profile";
+import type { Profile, WatchProgress } from "@/types/profile";
 import { MAX_PROFILES } from "@/types/profile";
 import { DEFAULT_AVATAR_ID, isValidAvatarId } from "@/lib/avatars";
 import { sanitizeProfileName } from "@/lib/validation";
 import { useTVNav } from "@/lib/tv-nav";
+import {
+  clearProgressApi,
+  createProfile as createProfileApi,
+  deleteProfileApi,
+  fetchProfiles,
+  importLegacyProfiles,
+  saveProgressApi,
+  setWatchlistApi,
+  updateProfileApi,
+} from "@/lib/api-client";
 
 /**
- * Camada de perfis locais (sem login) — persistida em localStorage no
- * formato descrito no spec do produto. Fica isolada atrás deste contexto de
- * propósito: se autenticação real (JWT/sessão + backend de usuários) for
- * adicionada no futuro, só a implementação de `loadStore`/`saveStore`
- * precisa trocar por chamadas de API — nenhuma tela consumidora muda.
+ * Camada de perfis — sem login (não é fronteira de segurança/privacidade
+ * real, só conveniência de UX, ver spec). A lista de perfis em si (nomes,
+ * avatares, watchlist, progresso) mora no SERVIDOR agora — um arquivo JSON
+ * compartilhado (ver src/lib/profiles-store.ts e as rotas /api/profiles) —
+ * em vez de localStorage, que era isolado por navegador/aparelho: TV,
+ * celular e PC cada um enxergava perfis diferentes (ou nenhum). Como o app
+ * roda só localmente, sem login de verdade, guardar num arquivo do próprio
+ * servidor sem autenticação é uma troca aceitável (ver comentário na rota).
  *
- * Perfis não são uma fronteira de segurança/privacidade real (não há
- * senha): é só uma conveniência de UX, como no spec.
+ * `perfilAtivoId` (qual perfil ESTE navegador tem selecionado agora)
+ * continua em localStorage de propósito — é por dispositivo, não
+ * compartilhado: trocar de perfil na TV não deveria mudar o que está ativo
+ * no celular de quem também estiver usando o app ao mesmo tempo.
+ *
+ * Toda mutação (criar/editar/excluir perfil, watchlist, progresso) atualiza
+ * o estado local na hora (otimista, pra UI continuar instantânea como
+ * antes) e manda a mudança pro servidor em seguida, reconciliando com a
+ * lista que ele devolve — que é a fonte da verdade de verdade.
  */
 
-const STORAGE_KEY = "flow_profiles_v1";
+const ACTIVE_ID_KEY = "flow_active_profile_id_v1";
+// Chave antiga (versão só-localStorage) — usada uma única vez pra migrar
+// perfis que já existiam neste navegador antes desta mudança, pra ninguém
+// perder o que já tinha criado (ver loadLegacyProfiles abaixo).
+const LEGACY_STORAGE_KEY = "flow_profiles_v1";
 
-function emptyStore(): ProfileStore {
-  return { perfis: [], perfilAtivoId: null };
-}
-
-function loadStore(): ProfileStore {
-  if (typeof window === "undefined") return emptyStore();
+function loadActiveId(): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyStore();
-    const parsed = JSON.parse(raw) as Partial<ProfileStore>;
-    if (!Array.isArray(parsed.perfis)) return emptyStore();
-    return {
-      perfis: parsed.perfis,
-      perfilAtivoId: parsed.perfilAtivoId ?? null,
-    };
+    return window.localStorage.getItem(ACTIVE_ID_KEY);
   } catch {
-    return emptyStore();
+    return null;
   }
 }
 
-function saveStore(store: ProfileStore) {
+function saveActiveId(id: string | null) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    if (id) window.localStorage.setItem(ACTIVE_ID_KEY, id);
+    else window.localStorage.removeItem(ACTIVE_ID_KEY);
   } catch {
     // localStorage indisponível (aba privada, quota cheia...) — a sessão
-    // atual continua funcionando em memória, só não persiste no reload.
+    // atual continua funcionando, só não lembra o perfil ativo no reload.
+  }
+}
+
+function loadLegacyProfiles(): Profile[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { perfis?: unknown };
+    return Array.isArray(parsed.perfis) ? (parsed.perfis as Profile[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -68,8 +94,8 @@ interface ProfileContextValue {
   activeProfile: Profile | null;
   selectProfile: (id: string) => void;
   exitProfile: () => void;
-  addProfile: (nome: string, avatarId: string) => boolean;
-  updateProfile: (id: string, nome: string, avatarId: string) => boolean;
+  addProfile: (nome: string, avatarId: string) => void;
+  updateProfile: (id: string, nome: string, avatarId: string) => void;
   deleteProfile: (id: string) => void;
   canAddProfile: boolean;
   toggleWatchlist: (tituloId: string) => void;
@@ -90,107 +116,137 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // Registered once here (wraps every route in the root layout) instead of
   // per-page — TV remote/D-pad navigation then works everywhere for free.
   useTVNav();
-  const [store, setStore] = useState<ProfileStore>(emptyStore);
+  const [perfis, setPerfis] = useState<Profile[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // localStorage só existe no cliente — lê aqui (pós-montagem) de
-    // propósito, pra não divergir do HTML renderizado no servidor.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStore(loadStore());
-    setReady(true);
+    let cancelled = false;
+    (async () => {
+      const localActiveId = loadActiveId();
+      let serverPerfis: Profile[];
+      try {
+        serverPerfis = await fetchProfiles();
+        // Servidor ainda não tem nenhum perfil — se este navegador tinha
+        // perfis do formato antigo (localStorage), migra pra cá agora, de
+        // uma vez só. Se outro dispositivo migrar os dele primeiro, a rota
+        // de import ignora silenciosamente (só aplica quando o servidor
+        // ainda está vazio) e a leitura abaixo já reflete o que ele gravou.
+        if (serverPerfis.length === 0) {
+          const legacy = loadLegacyProfiles();
+          if (legacy.length > 0) {
+            serverPerfis = await importLegacyProfiles(legacy);
+          }
+        }
+      } catch {
+        // Servidor inacessível — segue com lista vazia; a tela de perfis
+        // fica vazia mas não trava. Tenta de novo no próximo carregamento.
+        serverPerfis = [];
+      }
+      if (cancelled) return;
+      setPerfis(serverPerfis);
+      setActiveId(
+        localActiveId && serverPerfis.some((p) => p.id === localActiveId) ? localActiveId : null
+      );
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const update = useCallback((updater: (s: ProfileStore) => ProfileStore) => {
-    setStore((prev) => {
-      const next = updater(prev);
-      saveStore(next);
-      return next;
-    });
-  }, []);
+  // Aplica a mudança já computada localmente (feedback instantâneo, como
+  // antes) e reconcilia em seguida com o que o servidor de fato gravou —
+  // que pode diferir um pouco se outro dispositivo mexeu em outro perfil
+  // nesse meio-tempo. Se a chamada falhar (rede caiu, servidor fora do ar),
+  // mantém a versão otimista: a sessão atual continua funcionando, só não
+  // fica salva de verdade até a próxima mutação bem-sucedida.
+  const applyMutation = useCallback(
+    (optimistic: Profile[], action: () => Promise<Profile[]>) => {
+      setPerfis(optimistic);
+      action()
+        .then((serverPerfis) => setPerfis(serverPerfis))
+        .catch(() => {});
+    },
+    []
+  );
 
   const selectProfile = useCallback(
     (id: string) => {
-      update((s) => (s.perfis.some((p) => p.id === id) ? { ...s, perfilAtivoId: id } : s));
+      if (!perfis.some((p) => p.id === id)) return;
+      saveActiveId(id);
+      setActiveId(id);
     },
-    [update]
+    [perfis]
   );
 
   const exitProfile = useCallback(() => {
-    update((s) => ({ ...s, perfilAtivoId: null }));
-  }, [update]);
+    saveActiveId(null);
+    setActiveId(null);
+  }, []);
 
   const addProfile = useCallback(
-    (nomeRaw: string, avatarIdRaw: string): boolean => {
+    (nomeRaw: string, avatarIdRaw: string) => {
       const nome = sanitizeProfileName(nomeRaw);
-      if (!nome) return false;
+      if (!nome || perfis.length >= MAX_PROFILES) return;
       const avatarId = isValidAvatarId(avatarIdRaw) ? avatarIdRaw : DEFAULT_AVATAR_ID;
-      let ok = false;
-      update((s) => {
-        if (s.perfis.length >= MAX_PROFILES) return s;
-        ok = true;
-        const profile: Profile = {
-          id: uid(),
-          nome,
-          avatarId,
-          listaAssistirMaisTarde: [],
-          continuarAssistindo: [],
-        };
-        return { ...s, perfis: [...s.perfis, profile] };
-      });
-      return ok;
+      const novo: Profile = {
+        id: uid(),
+        nome,
+        avatarId,
+        listaAssistirMaisTarde: [],
+        continuarAssistindo: [],
+      };
+      applyMutation([...perfis, novo], () => createProfileApi(nome, avatarId));
     },
-    [update]
+    [perfis, applyMutation]
   );
 
   const updateProfile = useCallback(
-    (id: string, nomeRaw: string, avatarIdRaw: string): boolean => {
+    (id: string, nomeRaw: string, avatarIdRaw: string) => {
       const nome = sanitizeProfileName(nomeRaw);
-      if (!nome) return false;
+      if (!nome) return;
       const avatarId = isValidAvatarId(avatarIdRaw) ? avatarIdRaw : DEFAULT_AVATAR_ID;
-      update((s) => ({
-        ...s,
-        perfis: s.perfis.map((p) => (p.id === id ? { ...p, nome, avatarId } : p)),
-      }));
-      return true;
+      const next = perfis.map((p) => (p.id === id ? { ...p, nome, avatarId } : p));
+      applyMutation(next, () => updateProfileApi(id, nome, avatarId));
     },
-    [update]
+    [perfis, applyMutation]
   );
 
   const deleteProfile = useCallback(
     (id: string) => {
-      update((s) => ({
-        perfis: s.perfis.filter((p) => p.id !== id),
-        perfilAtivoId: s.perfilAtivoId === id ? null : s.perfilAtivoId,
-      }));
+      const next = perfis.filter((p) => p.id !== id);
+      if (activeId === id) {
+        saveActiveId(null);
+        setActiveId(null);
+      }
+      applyMutation(next, () => deleteProfileApi(id));
     },
-    [update]
+    [perfis, activeId, applyMutation]
   );
 
   const activeProfile = useMemo(
-    () => store.perfis.find((p) => p.id === store.perfilAtivoId) ?? null,
-    [store]
+    () => perfis.find((p) => p.id === activeId) ?? null,
+    [perfis, activeId]
   );
 
   const toggleWatchlist = useCallback(
     (tituloId: string) => {
       if (!activeProfile) return;
       const id = activeProfile.id;
-      update((s) => ({
-        ...s,
-        perfis: s.perfis.map((p) => {
-          if (p.id !== id) return p;
-          const has = p.listaAssistirMaisTarde.includes(tituloId);
-          return {
-            ...p,
-            listaAssistirMaisTarde: has
-              ? p.listaAssistirMaisTarde.filter((x) => x !== tituloId)
-              : [...p.listaAssistirMaisTarde, tituloId],
-          };
-        }),
-      }));
+      const has = activeProfile.listaAssistirMaisTarde.includes(tituloId);
+      const next = perfis.map((p) => {
+        if (p.id !== id) return p;
+        return {
+          ...p,
+          listaAssistirMaisTarde: has
+            ? p.listaAssistirMaisTarde.filter((x) => x !== tituloId)
+            : [...p.listaAssistirMaisTarde, tituloId],
+        };
+      });
+      applyMutation(next, () => setWatchlistApi(id, tituloId, has ? "remove" : "add"));
     },
-    [activeProfile, update]
+    [activeProfile, perfis, applyMutation]
   );
 
   const isInWatchlist = useCallback(
@@ -198,6 +254,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     [activeProfile]
   );
 
+  // saveProgress é chamado com frequência (a cada 5s enquanto o vídeo toca,
+  // ver VideoPlayer) — manda cada chamada pro servidor conforme acontece
+  // (sem debounce aqui: o intervalo de 5s do player já é o "debounce").
   const saveProgress = useCallback(
     (
       tituloId: string,
@@ -207,24 +266,22 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     ) => {
       if (!activeProfile || !duracaoSegundos) return;
       const id = activeProfile.id;
-      update((s) => ({
-        ...s,
-        perfis: s.perfis.map((p) => {
-          if (p.id !== id) return p;
-          const rest = p.continuarAssistindo.filter((c) => c.tituloId !== tituloId);
-          const quaseNoFim = progressoSegundos >= duracaoSegundos - 5;
-          const quaseNoInicio = progressoSegundos <= 5;
-          if (quaseNoFim || quaseNoInicio) {
-            return { ...p, continuarAssistindo: rest };
-          }
-          return {
-            ...p,
-            continuarAssistindo: [...rest, { tituloId, episodioId, progressoSegundos }],
-          };
-        }),
-      }));
+      const quaseNoFim = progressoSegundos >= duracaoSegundos - 5;
+      const quaseNoInicio = progressoSegundos <= 5;
+      const next = perfis.map((p) => {
+        if (p.id !== id) return p;
+        const rest = p.continuarAssistindo.filter((c) => c.tituloId !== tituloId);
+        if (quaseNoFim || quaseNoInicio) return { ...p, continuarAssistindo: rest };
+        return {
+          ...p,
+          continuarAssistindo: [...rest, { tituloId, episodioId, progressoSegundos }],
+        };
+      });
+      applyMutation(next, () =>
+        saveProgressApi(id, tituloId, episodioId, progressoSegundos, duracaoSegundos)
+      );
     },
-    [activeProfile, update]
+    [activeProfile, perfis, applyMutation]
   );
 
   const getProgress = useCallback(
@@ -236,28 +293,26 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     (tituloId: string) => {
       if (!activeProfile) return;
       const id = activeProfile.id;
-      update((s) => ({
-        ...s,
-        perfis: s.perfis.map((p) =>
-          p.id === id
-            ? { ...p, continuarAssistindo: p.continuarAssistindo.filter((c) => c.tituloId !== tituloId) }
-            : p
-        ),
-      }));
+      const next = perfis.map((p) =>
+        p.id === id
+          ? { ...p, continuarAssistindo: p.continuarAssistindo.filter((c) => c.tituloId !== tituloId) }
+          : p
+      );
+      applyMutation(next, () => clearProgressApi(id, tituloId));
     },
-    [activeProfile, update]
+    [activeProfile, perfis, applyMutation]
   );
 
   const value: ProfileContextValue = {
     ready,
-    profiles: store.perfis,
+    profiles: perfis,
     activeProfile,
     selectProfile,
     exitProfile,
     addProfile,
     updateProfile,
     deleteProfile,
-    canAddProfile: store.perfis.length < MAX_PROFILES,
+    canAddProfile: perfis.length < MAX_PROFILES,
     toggleWatchlist,
     isInWatchlist,
     saveProgress,

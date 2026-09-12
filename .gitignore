@@ -20,6 +20,10 @@
 # production
 /build
 
+# dados locais dos perfis quando FLOW_DATA_DIR não está configurada (ver
+# src/lib/profiles-store.ts e .env.example) — nunca deve ir pro git.
+/data/
+
 # misc
 .DS_Store
 *.pem

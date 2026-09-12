@@ -1,7 +1,6 @@
 /**
- * Perfis locais (sem login). Formato espelha exatamente o schema descrito
- * no spec do produto, para que trocar a persistência por uma API real no
- * futuro seja só trocar a implementação do ProfileProvider.
+ * Perfis sem login (ver profile-context.tsx e profiles-store.ts). Formato
+ * espelha exatamente o schema descrito no spec do produto.
  */
 
 export interface WatchProgress {
@@ -16,11 +15,6 @@ export interface Profile {
   avatarId: string;
   listaAssistirMaisTarde: string[];
   continuarAssistindo: WatchProgress[];
-}
-
-export interface ProfileStore {
-  perfis: Profile[];
-  perfilAtivoId: string | null;
 }
 
 export const MAX_PROFILES = 4;

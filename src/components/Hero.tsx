@@ -44,6 +44,28 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     return () => clearTimeout(t);
   }, [title]);
 
+  // Pré-carrega todos os banners do carrossel assim que a lista chega, em
+  // vez de só quando cada slide entra. Sem isso, o crossfade (abaixo) começa
+  // a animar a opacidade de uma camada cujo background-image ainda nem
+  // terminou de baixar — o resultado visual é a imagem antiga sumindo, uma
+  // caixa em branco/preta entrando no lugar dela, e a nova imagem só
+  // "estourando" (pop-in) quando o carregamento termina, bem depois da
+  // animação já ter acabado. Isso é boa parte do porquê o carrossel nunca
+  // pareceu de verdade suave: com a imagem já em cache do navegador, o
+  // crossfade de opacidade não compete com rede nenhuma.
+  useEffect(() => {
+    const imgs = titles.map((t) => {
+      const img = new Image();
+      img.src = bannerUrl(t.id);
+      return img;
+    });
+    return () => {
+      imgs.forEach((img) => {
+        img.src = "";
+      });
+    };
+  }, [titles]);
+
   // Avança automaticamente pelos títulos disponíveis. Depende de `index`
   // (não só de titles.length) pra reiniciar a contagem sempre que o slide
   // muda por QUALQUER motivo, inclusive um swipe manual — sem isso, um
@@ -102,6 +124,43 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     goTo(dx < 0 ? 1 : -1);
   }
 
+  // Texto (título/sinopse/botões) crossfada junto com a imagem, na mesma
+  // duração/curva — em vez do texto trocar na hora (troca de `key` derruba
+  // o bloco antigo instantaneamente, é assim que ele volta a animar a cada
+  // slide) enquanto só a imagem some aos poucos por baixo. Essa mistura de
+  // "texto corta, imagem esmaece" era boa parte do carrossel nunca parecer
+  // suave de verdade. `prevTitle` (mesmo estado que já controla a camada de
+  // imagem antiga) também controla a camada de texto antiga; o texto novo
+  // sempre existe e sempre é o interativo — o antigo é só decoração
+  // enquanto esmaece, por isso pointer-events:none nele.
+  function renderContent(t: TitleSummary, isPrev: boolean) {
+    const progress = isPrev ? Boolean(getProgress(t.id)) : hasProgress;
+    return (
+      <div
+        key={`${t.id}-content${isPrev ? "-prev" : ""}`}
+        className={`hero-content${isPrev ? " hero-content-prev" : " hero-content-current"}`}
+      >
+        <h1 className="hero-title">{t.titulo}</h1>
+        <div className="hero-meta">{metaLine(t)}</div>
+        <p className="hero-desc">{t.sinopse}</p>
+        <div className="hero-actions">
+          <button className="btn-hero play" onClick={isPrev ? undefined : handlePlay} tabIndex={isPrev ? -1 : 0}>
+            ▶ {progress ? "Continuar assistindo" : "Assistir"}
+          </button>
+          <Link
+            href={`/title/${t.id}`}
+            className="btn-hero info"
+            tabIndex={isPrev ? -1 : 0}
+            aria-hidden={isPrev}
+          >
+            ⓘ Detalhes
+          </Link>
+        </div>
+        {!isPrev && unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="hero" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {prevTitle && (
@@ -116,20 +175,8 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
         style={{ backgroundImage: `url('${bannerUrl(title.id)}')` }}
       />
       <div className="hero-fade" />
-      <div key={`${title.id}-content`} className="hero-content">
-        <h1 className="hero-title">{title.titulo}</h1>
-        <div className="hero-meta">{metaLine(title)}</div>
-        <p className="hero-desc">{title.sinopse}</p>
-        <div className="hero-actions">
-          <button className="btn-hero play" onClick={handlePlay}>
-            ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
-          </button>
-          <Link href={`/title/${title.id}`} className="btn-hero info">
-            ⓘ Detalhes
-          </Link>
-        </div>
-        {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
-      </div>
+      {prevTitle && renderContent(prevTitle, true)}
+      {renderContent(title, false)}
     </div>
   );
 }

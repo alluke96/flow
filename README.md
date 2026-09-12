@@ -29,12 +29,9 @@ npm run lint                 # eslint
 1. Importe este repositório na Vercel (ou `vercel --prod` pela CLI).
 2. Nenhuma variável de ambiente é obrigatória pro primeiro deploy — o app
    sobe funcionando de ponta a ponta (perfil → catálogo → player) com o
-   catálogo mock.
-3. Depois do deploy, defina `NEXT_PUBLIC_SITE_ORIGIN` com a URL final (ex:
-   `https://flow.vercel.app`) em Project Settings → Environment Variables e
-   faça um redeploy — isso aperta a checagem de CORS em `/api/*` (ver
-   `src/proxy.ts`). Sem essa variável o app funciona igual, só com CORS mais
-   permissivo.
+   catálogo mock. CORS em `/api/*` já vem restrito à própria origem
+   automaticamente (comparado contra o Host de cada request, ver
+   `src/proxy.ts`) — não precisa configurar nada pra isso.
 
 ## Conectar o Google Drive real
 
@@ -143,7 +140,7 @@ src/
     validation.ts              zod: formato de IDs, sanitização de nome de perfil
     rate-limit.ts, cache.ts    utilitários em memória (ver comentários nos arquivos)
   context/
-    profile-context.tsx        perfis locais (localStorage), isolados atrás de um contexto
+    profile-context.tsx        perfis sem login (servidor), isolados atrás de um contexto
   proxy.ts                     headers de segurança, CSP com nonce, CORS, rate limiting
 ```
 
@@ -152,11 +149,17 @@ função só, se usa `mock.ts` ou `drive.ts` — com base em que variáveis de
 ambiente existem. Toda rota de API e toda tela fala só com essa interface
 (`CatalogSource`), então trocar a fonte de dados nunca exige tocar em UI.
 
-**Por que perfis em Context + localStorage?** Não há login (spec do
+**Por que perfis em Context, sem login?** Não há autenticação (spec do
 produto). A lógica fica isolada em `ProfileProvider` pra que, se autenticação
-de verdade for adicionada no futuro, só a persistência troque (localStorage →
-API), sem reescrever telas. Perfis não são uma fronteira de segurança real —
-é só conveniência de UX, como no Netflix antes de "entrar" numa conta.
+de verdade for adicionada no futuro, só a persistência troque, sem reescrever
+telas. Perfis (nome, avatar, watchlist, progresso) ficam num arquivo JSON no
+servidor (ver `src/lib/profiles-store.ts`), compartilhado entre todos os
+dispositivos que acessarem o app — sem login, não faz sentido isolar por
+navegador, e um app doméstico ganha muito mais em poder continuar assistindo
+de outro aparelho do mesmo perfil. Só qual perfil está ativo *neste*
+navegador continua em localStorage (ver `ACTIVE_ID_KEY`), de propósito — é
+por dispositivo. Perfis não são uma fronteira de segurança real — é só
+conveniência de UX, como no Netflix antes de "entrar" numa conta.
 
 ## Segurança
 
@@ -170,10 +173,11 @@ API), sem reescrever telas. Perfis não são uma fronteira de segurança real �
   `script-src` travado a `'self'` + nonce por request + `strict-dynamic`;
   também `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy`, `Strict-Transport-Security`, `Permissions-Policy`.
-- **CORS restrito** em `/api/*` (via `NEXT_PUBLIC_SITE_ORIGIN`) e **rate
-  limiting** por IP, com foco em `/api/stream` (ver `src/lib/rate-limit.ts` —
-  em memória; para múltiplas regiões, trocar por um backend compartilhado
-  mantendo a mesma assinatura).
+- **CORS restrito** em `/api/*` (Origin comparado contra o Host da própria
+  request, ver `src/proxy.ts` — funciona em qualquer endereço/domínio sem
+  configuração) e **rate limiting** por IP, com foco em `/api/stream` (ver
+  `src/lib/rate-limit.ts` — em memória; para múltiplas regiões, trocar por
+  um backend compartilhado mantendo a mesma assinatura).
 - **Credenciais nunca chegam ao frontend**: `GOOGLE_SERVICE_ACCOUNT_KEY` só é
   lida em `src/lib/drive/client.ts`, do lado do servidor.
 - **Auth pluggável**: `src/lib/auth.ts` já existe como middleware "vazio" —

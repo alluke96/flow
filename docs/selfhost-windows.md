@@ -44,14 +44,24 @@ New-Item -ItemType Directory -Path C:\flow-secrets -Force
 notepad C:\flow-secrets\.env.local
 ```
 
-Fill it with the same three variables from `.env.example`:
+Fill it with the same two variables from `.env.example`, plus `FLOW_DATA_DIR`:
 ```
 GOOGLE_SERVICE_ACCOUNT_KEY=<the same JSON/base64 value you used on Vercel>
 GOOGLE_DRIVE_ROOT_FOLDER_ID=<the same folder ID you used on Vercel>
-NEXT_PUBLIC_SITE_ORIGIN=http://<this-PC's-LAN-IP>:3000
+FLOW_DATA_DIR=C:\flow-data
 ```
-Find the LAN IP with `ipconfig` (the `IPv4 Address` under your wifi/ethernet
-adapter, e.g. `192.168.1.42`). This must be the PC's IP, not the TV's.
+(CORS no longer needs an env var — it's derived automatically from each
+request's own Host header, so it keeps working no matter which address you
+reach the app by: LAN IP, `.local` hostname, Vercel domain, etc.)
+
+`FLOW_DATA_DIR` is where profiles (names, avatars, watchlist, watch
+progress) get saved — shared across every device that opens the app, since
+there's no login (see `.env.example` for why). It must point **outside**
+the repo folder, same reasoning as the secrets above: every deploy checks
+the repo out fresh, which would wipe it if it lived inside `C:\flow`.
+```powershell
+New-Item -ItemType Directory -Path C:\flow-data -Force
+```
 
 Copy it into the repo once and do a sanity-check build:
 ```powershell
