@@ -18,6 +18,15 @@ node -v
 git --version
 ```
 
+PowerShell blocks running scripts by default, and `npm` on Windows is a
+`.ps1` script — without this, every `npm ...` command fails with a
+`PSSecurityException`. Fix it once (machine-wide, so it also covers
+whichever account ends up running the GitHub Actions runner service later):
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine
+```
+Confirm with `Y` when prompted.
+
 ## 2. Clone the repo and configure secrets
 
 ```powershell

@@ -22,10 +22,16 @@ jobs:
         shell: powershell
         run: Copy-Item "C:\flow-secrets\.env.local" -Destination ".env.local" -Force
 
+      # cmd, not the runner's default PowerShell shell: npm on Windows is a
+      # .ps1 wrapper, subject to PowerShell's execution policy — cmd isn't,
+      # so this keeps deploys working even if a future account running the
+      # runner service never had RemoteSigned set (see setup doc).
       - name: Install dependencies
+        shell: cmd
         run: npm ci
 
       - name: Build
+        shell: cmd
         run: npm run build
 
       # NSSM-managed Windows service named "Flow" (see setup doc). Restarting
