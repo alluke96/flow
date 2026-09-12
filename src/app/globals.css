@@ -419,6 +419,8 @@ a {
   position: relative;
   height: min(78vh, 720px);
   min-height: 420px;
+  display: flex;
+  align-items: flex-end;
 }
 .hero-bg {
   position: absolute;
@@ -443,28 +445,11 @@ a {
     rgba(10, 10, 11, 0.55) 100%
   );
 }
-/* Absoluto, empilhado sobre .hero-bg/.hero-fade: durante uma troca de slide
-   existem DOIS (o antigo esmaecendo, o novo entrando) e precisam ocupar
-   exatamente a mesma caixa, senão não crossfada — só trocaria de lugar. */
 .hero-content {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
   padding: 0 clamp(16px, 4vw, 48px) 48px;
   max-width: 640px;
-}
-/* Mesma duração/curva do crossfade da imagem (.hero-bg-current) —
-   sincronizado de propósito, pra não dar a impressão de que o texto está
-   atrasado em relação à imagem. */
-.hero-content-current {
-  animation: fade-in 0.9s cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-/* Camada de baixo durante a troca (mesmo papel que .hero-bg tem pra
-   imagem): fica parada em opacidade 1 até a de cima cobrir ela por
-   completo, sem clique — ela está a caminho de sumir. */
-.hero-content-prev {
-  pointer-events: none;
+  animation: fade-in-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .hero-title {
   font-size: clamp(32px, 5.5vw, 64px);

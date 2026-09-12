@@ -315,7 +315,7 @@ export function VideoPlayer({
     showOverlay();
   }
 
-  function handleTouchEnd(e: TouchEvent<HTMLVideoElement>) {
+  function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
     if (isControlTarget(e.target)) return;
     const touch = e.changedTouches[0];
     if (!touch) return;
@@ -535,7 +535,21 @@ export function VideoPlayer({
     <div
       className={`player-shell${overlayHidden ? " controls-hidden" : ""}`}
       onMouseMove={showOverlay}
+      onClick={handleVideoAreaClick}
+      onTouchEnd={handleTouchEnd}
     >
+      {/* Clique/toque pra tocar-pausar e o duplo-toque pra buscar ±10s
+          precisam ficar AQUI, no container, não no <video> em si: .player-
+          overlay (controles) é um IRMÃO do <video>, empilhado por cima via
+          position:absolute, e fica visível a maior parte do tempo (só some
+          de verdade depois de alguns segundos de inatividade). Um toque
+          nessa área nunca chega no <video> — elementos irmãos não propagam
+          evento um pro outro. Só bindar aqui é que garante que o gesto
+          funciona também quando os controles estão visíveis, que é a
+          situação mais comum (é por isso que o duplo-toque parecia nunca
+          funcionar: só funcionava na rara janela em que os controles já
+          tinham sumido sozinhos). isControlTarget continua filtrando
+          cliques que caem em cima de um botão/slider de verdade. */}
       <video
         ref={videoRef}
         className="player-video"
@@ -561,8 +575,6 @@ export function VideoPlayer({
           doSaveProgress();
         }}
         onEnded={handleEnded}
-        onClick={handleVideoAreaClick}
-        onTouchEnd={handleTouchEnd}
         onWaiting={() => setLoading(true)}
         onCanPlay={() => setLoading(false)}
         onPlaying={() => {

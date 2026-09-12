@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -162,24 +163,27 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // mantém a versão otimista: a sessão atual continua funcionando, só não
   // fica salva de verdade até a próxima mutação bem-sucedida.
   //
-  // O setTimeout(...,0) na reconciliação NÃO é cosmético — é a correção de
-  // um bug real (botão de voltar quebrando de novo depois desta mudança):
-  // saveProgress toca este contexto (ancestral) a cada 5s enquanto o vídeo
-  // toca (ver VideoPlayer). Antes de perfis morarem no servidor, essa
-  // chamada era 100% síncrona e o VideoPlayer já adiava a chamada inteira
-  // um tick pra nunca coincidir com uma transição de rota em andamento (ex:
-  // clicar em "voltar"). Agora existe uma SEGUNDA atualização de estado,
-  // disparada quando o fetch resolve — num momento totalmente
-  // imprevisível, que pode muito bem cair no meio de uma transição mesmo
-  // que a chamada original tenha sido adiada direitinho. Adiar aqui,
-  // dentro de applyMutation, protege TODO mundo que chamar isso (mesmo
-  // espírito de "adiamento mora num lugar só" já usado em doSaveProgress).
+  // startTransition (não um setTimeout(...,0)) nas duas atualizações NÃO é
+  // cosmético — é a correção de um bug real (botão de voltar quebrando de
+  // novo depois desta mudança): saveProgress toca este contexto (ancestral)
+  // a cada 5s enquanto o vídeo toca (ver VideoPlayer), e antes de perfis
+  // morarem no servidor bastava adiar essa chamada por UM tick (setTimeout)
+  // pra nunca coincidir com uma transição de rota em andamento (ex: clicar
+  // em "voltar"). Isso funcionava porque a transição em si também só levava
+  // um punhado de ticks. Agora a reconciliação dispara quando um fetch de
+  // rede resolve — um tempo IMPREVISÍVEL que pode facilmente ultrapassar
+  // aqueles poucos ticks, especialmente se a rota de destino também precisa
+  // buscar dados (ex: catálogo do /browse), alargando a janela em que a
+  // transição continua "pendente". Um atraso fixo não acompanha isso;
+  // startTransition sim — marca a atualização como de baixa prioridade,
+  // então o React sempre prioriza terminar a navegação em andamento antes
+  // dela, não importa quanto tempo isso leve.
   const applyMutation = useCallback(
     (optimistic: Profile[], action: () => Promise<Profile[]>) => {
-      setPerfis(optimistic);
+      startTransition(() => setPerfis(optimistic));
       action()
         .then((serverPerfis) => {
-          setTimeout(() => setPerfis(serverPerfis), 0);
+          startTransition(() => setPerfis(serverPerfis));
         })
         .catch(() => {});
     },

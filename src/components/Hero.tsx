@@ -141,37 +141,6 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     goTo(dx < 0 ? 1 : -1);
   }
 
-  // Texto crossfada junto com a imagem, mesma duração/curva — pedido
-  // explícito: sincronizado com a imagem, sem sensação de atraso. `isPrev`
-  // é só decoração enquanto esmaece (pointer-events:none, sem onClick).
-  function renderContent(t: TitleSummary, isPrev: boolean) {
-    const progress = isPrev ? Boolean(getProgress(t.id)) : hasProgress;
-    return (
-      <div
-        key={`${t.id}-content${isPrev ? "-prev" : ""}`}
-        className={`hero-content${isPrev ? " hero-content-prev" : " hero-content-current"}`}
-      >
-        <h1 className="hero-title">{t.titulo}</h1>
-        <div className="hero-meta">{metaLine(t)}</div>
-        <p className="hero-desc">{t.sinopse}</p>
-        <div className="hero-actions">
-          <button className="btn-hero play" onClick={isPrev ? undefined : handlePlay} tabIndex={isPrev ? -1 : 0}>
-            ▶ {progress ? "Continuar assistindo" : "Assistir"}
-          </button>
-          <Link
-            href={`/title/${t.id}`}
-            className="btn-hero info"
-            tabIndex={isPrev ? -1 : 0}
-            aria-hidden={isPrev}
-          >
-            ⓘ Detalhes
-          </Link>
-        </div>
-        {!isPrev && unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
-      </div>
-    );
-  }
-
   return (
     <div className="hero" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {prevTitle && (
@@ -186,8 +155,29 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
         style={{ backgroundImage: `url('${bannerUrl(title.id)}')` }}
       />
       <div className="hero-fade" />
-      {prevTitle && renderContent(prevTitle, true)}
-      {renderContent(title, false)}
+      {/* O texto NÃO crossfada com o anterior, ao contrário da imagem —
+          testado e revertido duas vezes na mesma sessão: duas fotos se
+          misturando fica natural, mas dois blocos de texto (ou o título
+          desenhado na própria arte do banner anterior, que também fica em
+          opacidade total por baixo) sobrepostos no mesmo lugar só parece
+          embaralhado/empilhado, texto por cima de texto, não importa a
+          duração. Troca de `key` derruba o bloco antigo na hora e o novo
+          entra deslizando de baixo pra cima, sem sobreposição nenhuma —
+          fica decidido assim, não é questão de velocidade. */}
+      <div key={`${title.id}-content`} className="hero-content">
+        <h1 className="hero-title">{title.titulo}</h1>
+        <div className="hero-meta">{metaLine(title)}</div>
+        <p className="hero-desc">{title.sinopse}</p>
+        <div className="hero-actions">
+          <button className="btn-hero play" onClick={handlePlay}>
+            ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
+          </button>
+          <Link href={`/title/${title.id}`} className="btn-hero info">
+            ⓘ Detalhes
+          </Link>
+        </div>
+        {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
+      </div>
     </div>
   );
 }
