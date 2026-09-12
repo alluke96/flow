@@ -123,10 +123,22 @@ export function VideoPlayer({
     };
   }, [showOverlay]);
 
+  // saveProgress mexe num contexto ancestral (perfis) — chamar isso de forma
+  // síncrona bem no meio de uma transição de rota em andamento (ex: acabou
+  // de clicar em "voltar") pode fazer o React/Next.js abortar essa transição
+  // silenciosamente (já vimos essa exata causa raiz umas 3 vezes nesta base
+  // de código: no efeito de cleanup do desmonte, no onPause, e agora aqui).
+  // Em vez de lembrar de adiar em cada lugar que chama doSaveProgress (é
+  // assim que a gente foi mordido de novo — o intervalo de 5s abaixo nunca
+  // tinha esse adiamento), o adiamento agora mora AQUI, uma vez só, pra
+  // proteger todo mundo que chamar essa função. Os valores em si são lidos
+  // na hora (síncrono, com o <video> ainda garantidamente válido) — só a
+  // chamada que toca o contexto ancestral é que espera o próximo tick.
   const doSaveProgress = useCallback(() => {
     const v = videoRef.current;
     if (!v || !v.duration) return;
-    saveProgress(titleId, episodeId, v.currentTime, v.duration);
+    const snapshot = { t: v.currentTime, d: v.duration };
+    setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
   }, [saveProgress, titleId, episodeId]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
@@ -378,6 +390,16 @@ export function VideoPlayer({
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      // Qualquer tecla conta como atividade e acorda os controles — sem
+      // isso, só onMouseMove resetava o timer de auto-esconder (ver
+      // .player-shell). Um controle remoto de TV nunca dispara mousemove,
+      // então depois de ~3s os controles (inclusive o botão de voltar,
+      // que também passou a sumir visualmente — ver .player-top.hidden)
+      // ficavam com pointer-events:none, parecendo "quebrados": Cima/Baixo
+      // (usados pra navegar entre eles, ver tv-nav.ts) eram as únicas
+      // teclas que não passavam por aqui pra reativar o overlay.
+      showOverlay();
+
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const isFormControl = tag ? ["BUTTON", "SELECT", "INPUT"].includes(tag) : false;
@@ -504,17 +526,10 @@ export function VideoPlayer({
         onPause={() => {
           setPlaying(false);
           // O navegador dispara "pause" nativamente ao remover o <video> do
-          // DOM — o que acontece bem no meio de uma troca de rota (ex:
-          // clicar em "voltar" com o vídeo tocando). Chamar doSaveProgress
-          // aqui de forma síncrona atualiza um contexto ancestral (perfis)
-          // nesse exato instante, o que pode fazer o React/Next.js abortar
-          // silenciosamente a transição em andamento — o botão "voltar"
-          // parece simplesmente não fazer nada. Mesmo problema (e mesma
-          // correção) do efeito de cleanup logo abaixo: adiar pro próximo
-          // tick tira a chamada do meio do commit da transição. Só afeta o
-          // timing do autosave em ~0ms; se o componente já tiver
-          // desmontado antes de rodar, o cleanup effect cobre o save.
-          setTimeout(doSaveProgress, 0);
+          // DOM — bem no meio de uma troca de rota (ex: "voltar" com o vídeo
+          // tocando). doSaveProgress já adia a parte que importa (ver sua
+          // definição) — é por isso que chamar direto aqui é seguro.
+          doSaveProgress();
         }}
         onEnded={handleEnded}
         onClick={handleVideoAreaClick}

@@ -9,11 +9,6 @@ import { checkRateLimit } from "@/lib/rate-limit";
  *  - Rate limiting por IP nos endpoints de API, com foco em streaming.
  */
 
-// Origem canônica do app em produção (defina NEXT_PUBLIC_SITE_ORIGIN nas
-// env vars do provedor de deploy, ex: https://flow.vercel.app). Enquanto
-// não estiver configurada, a checagem de CORS fica permissiva para não
-// travar o primeiro deploy antes do domínio final ser conhecido.
-const ALLOWED_ORIGIN = process.env.NEXT_PUBLIC_SITE_ORIGIN;
 const IS_DEV = process.env.NODE_ENV === "development";
 
 const RATE_LIMITS: Record<string, { limit: number; windowMs: number }> = {
@@ -78,8 +73,19 @@ export function proxy(req: NextRequest) {
   const csp = buildCsp(nonce);
 
   if (pathname.startsWith("/api/")) {
+    // CORS restrito: só a própria origem pode chamar /api/*. Em vez de
+    // comparar contra um domínio único fixo (o que quebra assim que o app
+    // roda em mais de um endereço — self-host acessado por IP, hostname
+    // .local, um domínio local via Pi-hole/AdGuard, etc., além do Vercel),
+    // compara contra o Host da própria request: uma chamada same-origin de
+    // verdade sempre tem Origin === "<protocolo>://<host que ela mesma
+    // recebeu>", não importa qual endereço isso seja. Uma origem diferente
+    // (outro site tentando chamar essa API) nunca bate com o Host da
+    // request dela mesma, então continua barrada igual.
     const origin = req.headers.get("origin");
-    if (origin && ALLOWED_ORIGIN && origin !== ALLOWED_ORIGIN) {
+    const host = req.headers.get("host");
+    const expectedOrigin = host ? `${req.nextUrl.protocol}//${host}` : null;
+    if (origin && expectedOrigin && origin !== expectedOrigin) {
       const res = NextResponse.json({ error: "origem não permitida" }, { status: 403 });
       res.headers.set("Content-Security-Policy", csp);
       return applySecurityHeaders(res);
