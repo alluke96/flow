@@ -240,13 +240,29 @@ export function VideoPlayer({
   function handleProgressPointerDown(e: PointerEvent<HTMLDivElement>) {
     draggingRef.current = true;
     setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
     const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
     dragPctRef.current = pct;
     // clique simples (sem arrastar) já busca a posição na hora
     seekToPct(pct);
     if (duration) setPreview({ pct, time: pct * duration });
     showOverlay();
+    // setPointerCapture só garante que pointermove/pointerup continuem
+    // chegando aqui se o ponteiro sair da barra durante um arrasto — não é
+    // essencial pro clique simples acima, que já aconteceu. Precisa ficar
+    // DEPOIS do seek e dentro de um try/catch: o navegador da TV (Tizen,
+    // acessado direto pelo browser, sem ser via app) tem uma implementação
+    // de Pointer Events incompleta/instável, e essa chamada pode lançar
+    // nele. Antes, ela era a primeira linha da função — a exceção abortava
+    // tudo antes de chegar no seekToPct, fazendo o clique não fazer nada
+    // (o preview no hover funcionava normal porque só depende de
+    // pointermove, que nunca passa por essa chamada).
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // sem suporte/instável neste navegador — degrada bem: o clique simples
+      // já funcionou acima, só um arrasto saindo da barra pode não continuar
+      // sendo rastreado perfeitamente.
+    }
   }
   function handleProgressPointerMove(e: PointerEvent<HTMLDivElement>) {
     const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
