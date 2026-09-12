@@ -304,7 +304,20 @@ export function VideoPlayer({
   }
 
   function isControlTarget(el: EventTarget | null): boolean {
-    return el instanceof HTMLElement
+    // Element, não HTMLElement: os ícones dos botões (voltar, play/pause,
+    // ±10s, mudo, tela cheia...) são <svg>/<path>, que são SVGElement —
+    // uma hierarquia de classes SEPARADA de HTMLElement no navegador (uma
+    // não é instância da outra). Com o check em HTMLElement, um clique que
+    // acertasse o desenho do ícone (o alvo visual óbvio de qualquer botão)
+    // never passava no closest() abaixo — a exclusão simplesmente não
+    // rodava — e o clique vazava pra handleVideoAreaClick, disparando
+    // togglePlay() junto. Isso ficou invisível enquanto esse handler só
+    // vivia no <video> (irmão dos controles, nunca alcançado por um clique
+    // neles) — virou um bug de verdade assim que passou a viver no
+    // .player-shell (ver handleVideoAreaClick/handleTouchEnd), alcançável
+    // por clique em QUALQUER botão do player. Element é a interface comum
+    // a HTML e SVG — closest() existe nela pros dois.
+    return el instanceof Element
       ? Boolean(el.closest("button, .progress-bar, .volume-slider, .rate-select"))
       : false;
   }
