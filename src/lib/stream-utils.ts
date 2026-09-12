@@ -62,8 +62,10 @@ export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uin
           }
         }
 
+        let bytes = 0;
         node.on("data", (chunk: Buffer) => {
           if (closed) return;
+          bytes += chunk.length;
           try {
             controller.enqueue(new Uint8Array(chunk));
           } catch {
@@ -76,7 +78,16 @@ export function nodeToWebStream(node: NodeJS.ReadableStream): ReadableStream<Uin
           if ((controller.desiredSize ?? 1) <= 0) source.pause?.();
         });
         node.on("end", () => finish(() => controller.close()));
-        node.on("error", (err) => finish(() => controller.error(err)));
+        // Sem log nenhum aqui, um erro do Drive no meio de um range
+        // request (rede, token expirado, limite de taxa) era engolido em
+        // silêncio: o navegador só via a busca "falhar" e voltar sozinho
+        // pra posição anterior — indistinguível de "o clique não fez
+        // nada". `bytes` na mensagem ajuda a diferenciar "nem começou a
+        // baixar" de "caiu no meio".
+        node.on("error", (err) => {
+          console.error(`[stream] origem (Drive) falhou depois de ${bytes} bytes:`, err);
+          finish(() => controller.error(err));
+        });
         // 'close' pode vir depois de 'end'/'error' (não é erro por si só).
         node.on("close", () => finish(() => controller.close()));
       },

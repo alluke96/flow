@@ -24,10 +24,16 @@ async function fetchDriveRange(
   const headers: Record<string, string> = {};
   if (range) headers.Range = `bytes=${range.start}-${range.end}`;
 
+  // Quanto tempo o Drive demora pra sequer ABRIR o stream pro range pedido
+  // — separado do tempo de download em si (esse aqui é só "conseguiu
+  // começar"). Uma busca (seek) pra um ponto ainda não baixado pede um
+  // range novo; se ISTO demorar ou falhar, é aqui que aparece.
+  const inicio = Date.now();
   const res = await drive.files.get(
     { fileId, alt: "media" },
     { responseType: "stream", headers }
   );
+  console.log(`[drive] range aberto pra ${fileId} (${headers.Range ?? "arquivo inteiro"}) em ${Date.now() - inicio}ms`);
 
   const status = range ? 206 : 200;
   const contentLength = range ? range.end - range.start + 1 : totalSize;

@@ -27,6 +27,15 @@ export async function GET(
   const source = getCatalogSource();
   const rangeHeader = req.headers.get("range");
 
+  // Log de toda entrada/saída deste endpoint — é o que falta pra
+  // correlacionar "cliquei em +10s na TV" com o que o servidor de fato fez
+  // com aquele pedido: chegou? veio com o Range certo? respondeu 206 com o
+  // intervalo certo, ou algo deu errado antes disso? Sem isto, uma busca
+  // que falha silenciosamente (o navegador só volta pra posição anterior,
+  // sem erro visível nenhum) não deixava rastro nenhum aqui.
+  const inicio = Date.now();
+  console.log(`[stream] pedido ${idResult.data} ep=${episodeParam ?? "-"} range=${rangeHeader ?? "-"}`);
+
   // openVideo valida internamente que `id`/`ep` existem no catálogo
   // conhecido antes de tocar em qualquer credencial/fileId do Drive — é
   // essa checagem que impede IDOR neste endpoint (spec, seção 7).
@@ -61,6 +70,11 @@ export async function GET(
   if (result.range) {
     headers["Content-Range"] = `bytes ${result.range.start}-${result.range.end}/${result.totalSize}`;
   }
+
+  console.log(
+    `[stream] resposta ${idResult.data}: status=${result.status}` +
+      ` ${headers["Content-Range"] ?? "(sem range)"} (abriu em ${Date.now() - inicio}ms)`
+  );
 
   return new NextResponse(result.body, { status: result.status, headers });
 }
