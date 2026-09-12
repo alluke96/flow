@@ -158,6 +158,18 @@ export function VideoPlayer({
   const doSaveProgress = useCallback(() => {
     const v = videoRef.current;
     if (!v || !v.duration) return;
+    // v.seeking true = uma busca ainda em andamento (ex: o seek de
+    // retomada, logo ao entrar — ver handleLoadedMetadata). currentTime
+    // pode não refletir o destino ainda nesse meio-tempo, especialmente
+    // numa rede mais lenta (uma TV na Wi-Fi contra o self-host, por
+    // exemplo): salvar essa amostra podia registrar um valor perto de 0
+    // mesmo tendo acabado de retomar de bem mais adiante. Pra uma série,
+    // isso é destrutivo — perto de 0 faz saveProgress DESCARTAR a entrada
+    // de "continuar assistindo" (ver quaseNoInicio em profile-context.tsx),
+    // e o próximo episódio a resolver, sem progresso nenhum pra achar, virava
+    // o primeiro da série. Esperar a busca assentar evita salvar essa
+    // amostra ruim; o intervalo de 5s tenta de novo em seguida.
+    if (v.seeking) return;
     const snapshot = { t: v.currentTime, d: v.duration };
     setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
   }, [saveProgress, titleId, episodeId]);
@@ -682,6 +694,15 @@ export function VideoPlayer({
         muted={muted}
         disablePictureInPicture
         disableRemotePlayback
+        // Nunca focável: em webviews de TV há relatos de que um <video>
+        // com foco nativo pode capturar as teclas de seta do controle pra
+        // trick-play próprio ANTES de qualquer JS vê-las — o que bateria
+        // certo com "os botões ±10s não fazem nada na TV" continuando a
+        // funcionar em touch/web (onde essa disputa não existe). O foco no
+        // player sempre fica num elemento de controle (botão, barra de
+        // progresso — ver tv-nav.ts), nunca no vídeo em si, então isto não
+        // tira alcance de ninguém.
+        tabIndex={-1}
         controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={(e) => {

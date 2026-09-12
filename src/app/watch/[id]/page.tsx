@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { RequireProfile } from "@/components/RequireProfile";
 import { VideoPlayer } from "@/components/VideoPlayer";
@@ -26,6 +26,17 @@ function PlayerLoading() {
       </div>
     </div>
   );
+}
+
+type EpisodeWithSeason = EpisodeSummary & { seasonNumero: number };
+
+function flattenEpisodes(title: TitleDetail): EpisodeWithSeason[] {
+  return title.temporadas?.flatMap((s) => s.episodios.map((e) => ({ ...e, seasonNumero: s.numero }))) ?? [];
+}
+
+interface Resolved {
+  episodeId: string | null;
+  initialTime: number;
 }
 
 function WatchInner() {
@@ -66,6 +77,72 @@ function WatchInner() {
     router.prefetch(`/title/${id}`);
   }, [id, router]);
 
+  // getProgress muda de identidade toda vez que QUALQUER coisa no contexto
+  // de perfis muda — inclusive o próprio VideoPlayer salvando progresso a
+  // cada 5s ENQUANTO o vídeo está tocando (ver o intervalo em
+  // VideoPlayer). Uma ref sempre aponta pra versão atual sem nunca entrar
+  // como dependência de nada abaixo — é o que faz a resolução do episódio
+  // (ver efeito logo adiante) só rodar quando de fato deveria, nunca só
+  // porque um save de progresso aconteceu no meio da própria reprodução.
+  const getProgressRef = useRef(getProgress);
+  useEffect(() => {
+    getProgressRef.current = getProgress;
+  }, [getProgress]);
+
+  const epFromUrl = searchParams.get("ep");
+
+  /**
+   * Qual episódio tocar e de onde, resolvido UMA VEZ — não a cada render.
+   *
+   * Antes isso era calculado direto no corpo do componente, lendo
+   * getProgress() toda vez que WatchInner renderizava. Parecia inofensivo,
+   * mas o VideoPlayer salva progresso a cada 5s ENQUANTO o vídeo está
+   * tocando, e cada salvamento muda o contexto de perfis — o que
+   * re-renderiza este componente. Nesse re-render, o cálculo rodava de
+   * novo: se a amostra de progresso daquele instante fosse "perto do
+   * início" (ex: por alguma instabilidade logo depois do seek de retomada
+   * — mais fácil de acontecer numa rede mais lenta, como a de uma TV),
+   * `saveProgress` (profile-context.tsx) descarta a entrada de "continuar
+   * assistindo" inteira. No PRÓXIMO recálculo, sem progresso nenhum pra
+   * achar, o fallback escolhia allEpisodes[0] (T1E1). Como esse valor vira
+   * a `key` do VideoPlayer, trocar de episódio NO MEIO da reprodução
+   * derrubava o player em andamento e remontava um novo do zero — o
+   * "começa de onde parei, mas alguns segundos depois volta pro T1E1
+   * do zero" relatado.
+   *
+   * Resolvendo uma vez só (quando o título carrega, ou quando a URL pede
+   * um episódio explícito de verdade — ex: avançar pro próximo, que usa
+   * router.replace) essa classe inteira de bug deixa de existir: nada que
+   * aconteça DEPOIS que o vídeo já começou a tocar pode mudar qual
+   * episódio está em cena.
+   */
+  const [resolved, setResolved] = useState<Resolved | null>(null);
+
+  useEffect(() => {
+    if (!title) return;
+
+    if (title.tipo !== "serie") {
+      const progress = getProgressRef.current(title.id);
+      setResolved({ episodeId: null, initialTime: progress?.progressoSegundos ?? 0 });
+      return;
+    }
+
+    const allEpisodes = flattenEpisodes(title);
+    let epId = epFromUrl;
+    if (!epId) {
+      // Nenhum episódio pedido na URL (ex: clicou em "Assistir"/"Continuar
+      // assistindo" na tela do título) — continua de onde parou, ou começa
+      // do primeiro se nunca assistiu nada dessa série.
+      const progress = getProgressRef.current(title.id);
+      epId = (allEpisodes.find((e) => e.id === progress?.episodioId) ?? allEpisodes[0])?.id ?? null;
+    }
+    const progress = getProgressRef.current(title.id);
+    const initialTime = progress && progress.episodioId === epId ? progress.progressoSegundos : 0;
+    setResolved({ episodeId: epId, initialTime });
+    // getProgress vem por ref de propósito (ver comentário acima) — é por
+    // isso que não entra aqui: refs não recriam o efeito ao mudar.
+  }, [title, epFromUrl]);
+
   if (loading) return <PlayerLoading />;
 
   if (error || !title) {
@@ -82,64 +159,39 @@ function WatchInner() {
     );
   }
 
-  const allEpisodes: (EpisodeSummary & { seasonNumero: number })[] =
-    title.temporadas?.flatMap((s) => s.episodios.map((e) => ({ ...e, seasonNumero: s.numero }))) ?? [];
+  // Título já carregou, mas o efeito acima ainda não rodou nesta rodada de
+  // render (roda logo após o commit) — mais um frame de loading, igual ao
+  // que já acontecia esperando o fetch do título.
+  if (!resolved) return <PlayerLoading />;
 
-  let episodeId = searchParams.get("ep");
-  let episode: (EpisodeSummary & { seasonNumero: number }) | undefined;
+  const allEpisodes = flattenEpisodes(title);
+  const episode = resolved.episodeId ? allEpisodes.find((e) => e.id === resolved.episodeId) : undefined;
 
-  if (title.tipo === "serie") {
-    if (episodeId) {
-      // Um episódio específico foi pedido na URL (ex: veio do avanço
-      // automático pro próximo, ou de um link direto) — confia nele. Cair
-      // pro fallback de "continuar assistindo"/primeiro episódio aqui seria
-      // errado: bastava esse id não resolver por um instante (ex: um
-      // re-render no meio da navegação) pra saltar de volta pro episódio 1
-      // da temporada 1 sem nenhum aviso, mesmo estando no meio de outro
-      // episódio qualquer.
-      episode = allEpisodes.find((e) => e.id === episodeId);
-    } else {
-      // Nenhum episódio pedido (ex: clicou em "Assistir" na tela do
-      // título) — aí sim faz sentido continuar de onde parou, ou começar
-      // do primeiro se nunca assistiu nada dessa série.
-      const progress = getProgress(title.id);
-      episode = allEpisodes.find((e) => e.id === progress?.episodioId) ?? allEpisodes[0];
-      episodeId = episode?.id ?? null;
-    }
-    if (!episode) {
-      return (
-        <div className="player-shell" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <p>
-            {searchParams.get("ep")
-              ? "Episódio não encontrado."
-              : "Esta série ainda não tem episódios."}
-          </p>
-        </div>
-      );
-    }
-  } else {
-    episodeId = null;
+  if (title.tipo === "serie" && !episode) {
+    return (
+      <div className="player-shell" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <p>{epFromUrl ? "Episódio não encontrado." : "Esta série ainda não tem episódios."}</p>
+      </div>
+    );
   }
 
-  const progress = getProgress(title.id);
-  const initialTime = progress && progress.episodioId === episodeId ? progress.progressoSegundos : 0;
   const displayTitle = episode
     ? `${title.titulo} — T${episode.seasonNumero}:E${episode.numero} — ${episode.titulo}`
     : title.titulo;
 
-  let nextEpisode: (EpisodeSummary & { seasonNumero: number }) | undefined;
+  let nextEpisode: EpisodeWithSeason | undefined;
   if (episode) {
-    const idx = allEpisodes.findIndex((e) => e.id === episode!.id);
+    const idx = allEpisodes.findIndex((e) => e.id === episode.id);
     nextEpisode = idx >= 0 ? allEpisodes[idx + 1] : undefined;
   }
 
   return (
     <VideoPlayer
-      key={`${title.id}:${episodeId ?? "movie"}`}
+      key={`${title.id}:${resolved.episodeId ?? "movie"}`}
       titleId={title.id}
-      episodeId={episodeId}
+      episodeId={resolved.episodeId}
       displayTitle={displayTitle}
-      initialTime={initialTime}
+      initialTime={resolved.initialTime}
       onExit={() => router.push(`/title/${title.id}`)}
       onNextEpisode={
         nextEpisode ? () => router.replace(`/watch/${title.id}?ep=${encodeURIComponent(nextEpisode!.id)}`) : undefined
