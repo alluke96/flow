@@ -1288,6 +1288,15 @@ a {
   }
   .player-center {
     gap: 28px;
+    /* No mobile o vídeo costuma tocar sem fullscreen de verdade (Safari
+       inline) — o .player-shell ocupa a página inteira, bem mais alto que
+       a imagem do vídeo em si (que fica com barras pretas grandes acima e
+       abaixo, ver <video object-fit:contain>). Centralizar dentro da caixa
+       inteira deixa os botões visivelmente acima do centro da IMAGEM, que é
+       o que o olho realmente usa como referência. Empurra pra baixo um
+       pouco pra compensar — aproximado (não sabemos a altura real do vídeo
+       renderizado sem medir via JS), ajustar se ainda não bater. */
+    transform: translateY(48px);
   }
   .player-center button svg {
     width: 24px;
