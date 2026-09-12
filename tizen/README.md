@@ -21,6 +21,26 @@ Isso exige que o servidor permita ser enquadrado: o CSP em `src/proxy.ts`
 manda `frame-ancestors 'self' file:` (a casca vive em `file://` na TV) e
 não manda mais `X-Frame-Options`.
 
+## Desligando o cursor do Smart Remote
+
+Se o controle ainda aparecer como ponteiro (cursor andando de pixel em
+pixel) em vez de foco pulando de elemento em elemento, falta um atributo no
+`<tizen:setting>` do SEU `config.xml`:
+
+```xml
+<tizen:setting ... pointing-device-support="disable"/>
+```
+
+Em TVs 2015-2020 o padrão é "enable" (por isso o cursor aparece sem essa
+linha); em 2021+ já vem desligado por padrão. Documentado em
+[Configuring Web Applications](https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html).
+Muda `config.xml` → precisa reinstalar o `.wgt` (ver "Atualizando" abaixo).
+
+(Se você tem uma linha `<tizen:metadata key=".../use.pointer.mode" .../>`
+de uma sugestão anterior nossa: pode apagar. Não é uma metadata real —
+`tizen:metadata` aceita qualquer chave sem validar, então nunca deu erro,
+só nunca fez efeito nenhum.)
+
 ## Instalando
 
 1. Tizen Studio → File → New → Tizen Project → Template → TV → Web
@@ -29,7 +49,8 @@ não manda mais `X-Frame-Options`.
    do template já funciona como está — o `config.xml` daqui é referência,
    não é pra copiar: declarar privilege de internet, `<access>` ou features
    de tela que o perfil `tv-samsung` não conhece faz o validador recusar o
-   projeto e o launch nem começa.
+   projeto e o launch nem começa. A única linha que vale adicionar ao SEU
+   `config.xml` é o `pointing-device-support="disable"` acima.
 3. Ajuste `URL_FLOW` no topo do `index.html` pro IP do PC.
 4. Copie o `icon.png` daqui pra raiz do projeto (512x423, que é o tamanho
    que a Samsung usa na fileira de apps). Tem também `icon-512.png`, a

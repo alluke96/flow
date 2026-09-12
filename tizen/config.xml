@@ -21,15 +21,23 @@
     <icon src="icon.png"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="true"/>
     <tizen:metadata key="http://tizen.org/metadata/app_ui_type/base_screen_resolution" value="extensive"/>
-    <!-- Sozinha esta linha não resolveu o ponteiro (a página tinha saído pro
-         contexto de navegador via location.replace). Mantida porque agora,
-         com o conteúdo dentro de um iframe, o documento de cima volta a ser
-         o app e a configuração passa a valer sobre ele. -->
-    <tizen:metadata key="http://samsung.com/tv/metadata/use.pointer.mode" value="false"/>
     <name>flow</name>
     <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
     <tizen:profile name="tv-samsung"/>
     <!-- hwkey-event="enable": faz o botão Return físico chegar como keydown
-         (keyCode 10009), que o tv-nav já trata (ver src/lib/tv-nav.ts). -->
-    <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+         (keyCode 10009), que o tv-nav já trata (ver src/lib/tv-nav.ts).
+
+         pointing-device-support="disable": É ISTO que desliga o cursor do
+         Smart Remote, não uma metadata (uma tentativa anterior aqui usava
+         `tizen:metadata key=".../use.pointer.mode"`, que não existe de
+         verdade — tizen:metadata aceita qualquer chave sem validar, então
+         nunca deu erro, só nunca fez nada). Documentado em
+         https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html:
+         em TVs 2015-2020 o padrão é "enable" (é por isso que sem esta linha
+         o cursor aparece); em 2021+ já vem "disable" por padrão. Com isto
+         desligado, o controle para de mandar coordenadas de ponteiro e passa
+         a mandar só teclas — é o que faz o foco "teleportar" de elemento em
+         elemento em vez do cursor andar de pixel em pixel, igual no menu de
+         configuração nativo da TV. -->
+    <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable" pointing-device-support="disable"/>
 </widget>
