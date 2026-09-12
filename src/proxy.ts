@@ -50,7 +50,21 @@ function buildCsp(nonce: string): string {
     // por nonce, que é o que importa contra XSS.
     "style-src 'self' 'unsafe-inline'",
     "connect-src 'self'",
-    "frame-ancestors 'none'",
+    // O app de TV (Tizen/Samsung) é uma casca que carrega o Flow num
+    // <iframe> em tela cheia, e a página dessa casca vive em file:// dentro
+    // da própria TV — por isso `file:` precisa estar liberado aqui, senão o
+    // iframe não carrega e a TV mostra tela preta.
+    //
+    // Por que iframe e não um redirect simples: com `location.replace` a TV
+    // sai do contexto do app e passa a tratar o conteúdo como página de
+    // navegador, o que liga o ponteiro do Smart Remote (o cursor andando de
+    // pixel em pixel) e engole as setas do controle — o tv-nav nunca chega
+    // a ver um ArrowDown. Dentro do iframe o app continua sendo app.
+    //
+    // O que isso custa: quem conseguir carregar uma página file:// no
+    // aparelho consegue embutir o Flow. Num app de LAN doméstica, sem login
+    // e sem sessão pra roubar, é um risco pequeno.
+    "frame-ancestors 'self' file:",
     "base-uri 'self'",
     "form-action 'self'",
   ].join("; ");
@@ -58,7 +72,14 @@ function buildCsp(nonce: string): string {
 
 function applySecurityHeaders(res: NextResponse): NextResponse {
   res.headers.set("X-Content-Type-Options", "nosniff");
-  res.headers.set("X-Frame-Options", "DENY");
+  // X-Frame-Options saiu de propósito: ele só sabe dizer DENY/SAMEORIGIN e
+  // não consegue expressar "permita a casca file:// do app de TV". Pela
+  // especificação o frame-ancestors do CSP tem precedência quando os dois
+  // existem, mas o webview do Tizen é um Chromium de alguns anos atrás e
+  // não vale apostar nisso pra descobrir com tela preta na TV. Quem manda
+  // no enquadramento agora é só o frame-ancestors acima — que é o
+  // mecanismo moderno, mais expressivo, e respeitado por todo navegador
+  // relevante.
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set(
     "Strict-Transport-Security",

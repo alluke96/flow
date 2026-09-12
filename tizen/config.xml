@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://flow.local/Flow" version="1.0.0" viewmodes="maximized">
+
+    <!-- IMPORTANTE: se você JÁ criou o projeto no Tizen Studio, mantenha o
+         `id` e o `package` que ele gerou (linha <tizen:application> abaixo).
+         Trocar esses valores cria um app SEPARADO na TV em vez de atualizar
+         o que já está instalado. O resto do arquivo pode copiar à vontade. -->
+    <tizen:application id="FlowApp01.Flow" package="FlowApp01" required_version="2.4"/>
+
+    <content src="index.html"/>
+    <name>Flow</name>
+    <icon src="icon.png"/>
+
+    <!-- Sem isto o app não consegue abrir o endereço do PC. O `origin="*"`
+         é necessário porque o destino é um IP da LAN, não um domínio fixo. -->
+    <access origin="*" subdomains="true"/>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+
+    <tizen:profile name="tv-samsung"/>
+    <feature name="http://tizen.org/feature/screen.size.all"/>
+
+    <!-- hwkey-event="enable" é o que faz o botão Return físico do controle
+         chegar como keydown (keyCode 10009) em vez de fechar o app na hora.
+         O tv-nav do Flow já trata esse código (ver src/lib/tv-nav.ts). -->
+    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+
+</widget>

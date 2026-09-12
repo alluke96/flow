@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Flow</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000; overflow: hidden;
+  }
+  /* O iframe ocupa a tela inteira: visualmente é indistinguível do app
+     "nativo", mas o documento de cima continua sendo o app Tizen — é isso
+     que mantém o controle no modo D-pad em vez de virar ponteiro. */
+  #flow {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; border: 0;
+  }
+  #splash {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 24px;
+    background: #000; color: #e5e5e5;
+    font: 400 34px/1.4 "Helvetica Neue", Arial, sans-serif;
+    text-align: center; padding: 0 80px;
+  }
+  #splash small { font-size: 24px; color: #8c8c8c; }
+</style>
+</head>
+<body>
+
+<div id="splash">
+  Abrindo o Flow…
+  <small id="alvo"></small>
+</div>
+
+<iframe id="flow" allow="autoplay; fullscreen; encrypted-media"></iframe>
+
+<script>
+(function () {
+  "use strict";
+
+  // ------------------------------------------------------------------
+  // Endereço do Flow no PC. É a ÚNICA coisa que você precisa mexer aqui.
+  // Vale reservar esse IP no DHCP do roteador: se ele mudar, o app abre
+  // no vazio e é preciso reinstalar o .wgt pra corrigir.
+  // ------------------------------------------------------------------
+  var URL_FLOW = "http://192.168.15.7:3000/";
+
+  var frame = document.getElementById("flow");
+  var splash = document.getElementById("splash");
+  document.getElementById("alvo").textContent = URL_FLOW;
+
+  // Teclas de mídia do controle não chegam ao app sem registro explícito.
+  // As de navegação (setas, Enter, Return) já vêm por padrão.
+  try {
+    if (window.tizen && tizen.tvinputdevice) {
+      ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop",
+       "MediaRewind", "MediaFastForward"].forEach(function (k) {
+        try { tizen.tvinputdevice.registerKey(k); } catch (e) {}
+      });
+    }
+  } catch (e) {}
+
+  // O ponto crítico: o foco precisa estar DENTRO do iframe, senão as teclas
+  // do controle ficam no documento da casca e o tv-nav do Flow nunca as vê.
+  // Focar funciona mesmo sendo outra origem — ler o conteúdo é que não.
+  function focarFlow() {
+    try { frame.contentWindow.focus(); } catch (e) {}
+  }
+
+  frame.addEventListener("load", function () {
+    splash.style.display = "none";
+    focarFlow();
+  });
+
+  // Voltar do protetor de tela / de outro app devolve o foco pra casca;
+  // esses dois eventos reempurram pra dentro.
+  window.addEventListener("focus", focarFlow);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) focarFlow();
+  });
+
+  // Se o PC estiver desligado o iframe não dispara "load" — depois de 15s
+  // tira o splash pra pelo menos aparecer o erro da própria TV.
+  setTimeout(function () { splash.style.display = "none"; }, 15000);
+
+  frame.src = URL_FLOW;
+})();
+</script>
+
+</body>
+</html>
