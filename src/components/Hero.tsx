@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type TouchEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { TitleSummary } from "@/types/catalog";
@@ -13,6 +13,9 @@ const ROTATE_MS = 10000;
 // depois desse tempo a camada de baixo (imagem anterior) some, porque a
 // de cima já terminou de entrar e está cobrindo ela por completo.
 const FADE_MS = 900;
+// Abaixo disso é considerado um toque/tap, não um swipe — evita trocar de
+// slide sem querer ao tocar num botão/link (que não move o dedo no eixo X).
+const SWIPE_THRESHOLD_PX = 50;
 
 export function Hero({ titles }: { titles: TitleSummary[] }) {
   const router = useRouter();
@@ -41,14 +44,27 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     return () => clearTimeout(t);
   }, [title]);
 
-  // Avança automaticamente pelos títulos disponíveis, sem controle manual.
+  // Avança automaticamente pelos títulos disponíveis. Depende de `index`
+  // (não só de titles.length) pra reiniciar a contagem sempre que o slide
+  // muda por QUALQUER motivo, inclusive um swipe manual — sem isso, um
+  // swipe logo antes do próximo tick automático faria o carrossel trocar
+  // de novo quase na sequência, parecendo instável.
   useEffect(() => {
     if (titles.length < 2) return;
     const id = setInterval(() => {
       setIndex((i) => (i + 1) % titles.length);
     }, ROTATE_MS);
     return () => clearInterval(id);
-  }, [titles.length]);
+  }, [titles.length, index]);
+
+  // Swipe por toque (smartphone/tablet): compara só a posição inicial e
+  // final do toque (touchstart/touchend) — não precisa acompanhar o
+  // touchmove, então não interfere no scroll vertical normal da página.
+  // Descarta toques que também se moveram bastante no eixo Y (provável
+  // scroll, não swipe horizontal) e os pequenos demais no eixo X (tap
+  // normal num botão/link do hero). Precisa vir ANTES do "if (!title)
+  // return null" abaixo — hooks não podem ser chamados condicionalmente.
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   if (!title) return null;
 
@@ -60,8 +76,34 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
     router.push(`/watch/${title.id}`);
   }
 
+  function goTo(delta: 1 | -1) {
+    if (titles.length < 2) return;
+    // Soma titles.length antes do módulo pra funcionar com delta negativo
+    // também (voltar do primeiro slide vai pro último — cycle nos dois
+    // sentidos, igual ao avanço automático já faz).
+    setIndex((i) => (i + delta + titles.length) % titles.length);
+  }
+
+  function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
+    const t = e.touches[0];
+    if (!t) return;
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+  }
+
+  function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
+    goTo(dx < 0 ? 1 : -1);
+  }
+
   return (
-    <div className="hero">
+    <div className="hero" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {prevTitle && (
         <div
           className="hero-bg"
