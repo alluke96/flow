@@ -12,6 +12,16 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
+      # The Flow service serves directly out of this same checkout folder —
+      # while it's running, Windows holds its files locked, and checkout's
+      # own cleanup step (deleting the folder's contents before re-cloning)
+      # hangs forever trying to delete files that are in use. Stopping the
+      # service first releases those locks. Restart-Service at the end
+      # works fine even starting from "stopped" (no error either way).
+      - name: Stop service (release file locks before checkout)
+        shell: powershell
+        run: Stop-Service -Name "Flow" -ErrorAction SilentlyContinue
+
       - uses: actions/checkout@v4
 
       # .env.local has real secrets (Drive service account key) — it must
