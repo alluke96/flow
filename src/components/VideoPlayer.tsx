@@ -362,7 +362,11 @@ export function VideoPlayer({
     // o caso de uso que a regra abaixo permite desativar.
     /* eslint-disable react-hooks/set-state-in-effect */
     setDuration(s.duration);
-    setCurrentTime(s.currentTime);
+    // seekPendente na frente: quando a TV recusa a busca e o vídeo está
+    // sendo reaberto no ponto pedido (ver tizen-player-bridge), é o destino
+    // que a barra mostra — o tempo de verdade ainda é o de antes do pulo, e
+    // ver a barra voltar pra lá a cada toque seria pior que esperar.
+    setCurrentTime(s.seekPendente ?? s.currentTime);
     setPlaying(!s.paused);
     setBufferedEnd(s.bufferedTime);
     setLoading(s.buffering);

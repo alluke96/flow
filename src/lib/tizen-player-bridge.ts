@@ -149,6 +149,14 @@ export interface TizenPlayerState {
   seeking: boolean;
   ended: boolean;
   error: string | null;
+  /**
+   * Ponto pra onde o vídeo está indo por REABERTURA, quando a TV recusa a
+   * busca (ver agendarReabertura). Serve pra INTERFACE: é o que a barra
+   * mostra enquanto o vídeo recarrega. `currentTime` continua sendo o
+   * tempo de verdade — quem salva progresso tem que gravar onde o vídeo
+   * está, não onde ele foi mandado ir.
+   */
+  seekPendente: number | null;
 }
 
 const ESTADO_INICIAL: TizenPlayerState = {
@@ -160,6 +168,7 @@ const ESTADO_INICIAL: TizenPlayerState = {
   seeking: false,
   ended: false,
   error: null,
+  seekPendente: null,
 };
 
 export interface TizenPlayerApi {
@@ -202,6 +211,9 @@ export function useTizenPlayer(): UseTizenPlayerResult {
   // player — que ainda é o de antes do pulo, ou zero durante a recarga.
   const alvoPendenteRef = useRef<number | null>(null);
   const alvoPendenteDesdeRef = useRef(0);
+  // null = ainda não se sabe; false = esta TV ignorou a posição inicial, e
+  // aí reabrir o vídeo pra buscar só faria perder o lugar (ver abaixo).
+  const posicaoInicialFuncionaRef = useRef<boolean | null>(null);
   const timerReaberturaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -237,20 +249,18 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         try {
           const ms = avplay.getCurrentTime();
           if (typeof ms === "number" && ms >= 0) {
+            estadoRef.current.currentTime = ms / 1000;
             const alvo = alvoPendenteRef.current;
-            const desistiuDeEsperar = Date.now() - alvoPendenteDesdeRef.current > LIMITE_ALVO_PENDENTE_MS;
-            if (alvo === null) {
-              estadoRef.current.currentTime = ms / 1000;
-            } else if (Math.abs(ms / 1000 - alvo) < 5 || desistiuDeEsperar) {
+            if (alvo !== null) {
               // Chegou onde foi pedido — ou não chegou e já passou tempo
               // demais (a reabertura também não pegou): de um jeito ou de
               // outro, voltar a mostrar o tempo real é melhor que uma barra
               // congelada num ponto onde o vídeo não está.
-              alvoPendenteRef.current = null;
-              estadoRef.current.currentTime = ms / 1000;
-            } else {
-              estadoRef.current.currentTime = alvo;
+              const chegou = Math.abs(ms / 1000 - alvo) < 5;
+              const cansou = Date.now() - alvoPendenteDesdeRef.current > LIMITE_ALVO_PENDENTE_MS;
+              if (chegou || cansou) alvoPendenteRef.current = null;
             }
+            estadoRef.current.seekPendente = alvoPendenteRef.current;
           }
           const durMs = avplay.getDuration();
           if (typeof durMs === "number" && durMs > 0) estadoRef.current.duration = durMs / 1000;
@@ -419,6 +429,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
                 try {
                   const atualMs = p2.getCurrentTime();
                   const pegou = Math.abs(atualMs - alvoMs) <= 5000;
+                  posicaoInicialFuncionaRef.current = pegou;
                   logarServidor(`retomada ${pegou ? "ok" : "NAO pegou"}: pedi ${alvoMs}ms, estou em ${atualMs}ms`);
                 } catch (e) {
                   logarServidor(`retomada: getCurrentTime falhou: ${descreverErro(e)}`);
@@ -464,9 +475,20 @@ export function useTizenPlayer(): UseTizenPlayerResult {
     (alvo: number) => {
       const url = urlRef.current;
       if (!url) return;
+      // Já se sabe que esta TV ignora a posição inicial: reabrir agora
+      // recarregaria o vídeo pra recomeçar do zero, ou seja, além de não
+      // buscar ainda faria o usuário PERDER o lugar em que estava. Melhor
+      // não fazer nada — a busca simplesmente não existe neste aparelho, e
+      // a barra volta a mostrar onde o vídeo está de verdade.
+      if (posicaoInicialFuncionaRef.current === false) {
+        alvoPendenteRef.current = null;
+        estadoRef.current.seekPendente = null;
+        logarServidor(`busca pra ${alvo.toFixed(1)}s ignorada: esta TV nao aceita nem posicao inicial`);
+        return;
+      }
       alvoPendenteRef.current = alvo;
       alvoPendenteDesdeRef.current = Date.now();
-      estadoRef.current.currentTime = alvo;
+      estadoRef.current.seekPendente = alvo;
       // Spinner na hora: a reabertura demora alguns segundos, e sem sinal
       // nenhum o botão parece não ter feito nada de novo.
       estadoRef.current.buffering = true;
