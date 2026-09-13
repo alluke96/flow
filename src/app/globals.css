@@ -1741,6 +1741,19 @@ html.tv-widget :focus {
   border-radius: 10px;
 }
 
+/* A fileira de pôsteres rola na horizontal, e rolagem num eixo faz o
+   navegador cortar o outro. Sem folga em cima e embaixo, o pôster em foco
+   — que cresce e ganha anel e halo — aparecia decepado nas duas pontas. A
+   margem da fileira encolhe junto, pra o espaçamento entre fileiras
+   continuar o mesmo. */
+html.tv-widget .row-track {
+  padding-top: 28px;
+  padding-bottom: 28px;
+}
+html.tv-widget .row {
+  margin: 10px 0;
+}
+
 html.tv-widget .card:focus {
   transform: scale(1.08);
   z-index: 2;
