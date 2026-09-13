@@ -135,10 +135,13 @@ export function VideoPlayer({
   const seekBy = useCallback(
     (delta: number) => {
       if (nativeMode) {
+        // Salto RELATIVO: quem soma os 10s é o player da TV, não a gente
+        // (ver seekBy em tizen-player-bridge.ts). O valor abaixo é só o
+        // palpite que a barra mostra até o espelho trazer o tempo de
+        // verdade, no próximo quarto de segundo.
+        tz.api.seekBy(delta);
         const max = tzStateRef.current.duration || Infinity;
-        const next = Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max);
-        tz.api.seekTo(next);
-        setCurrentTime(next);
+        setCurrentTime(Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max));
         showOverlay();
         return;
       }

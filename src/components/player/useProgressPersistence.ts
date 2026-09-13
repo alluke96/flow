@@ -1,4 +1,5 @@
-import { useCallback, useEffect, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { logarServidor } from "@/lib/tizen-player-bridge";
 
 type SaveProgress = (
   tituloId: string,
@@ -23,6 +24,21 @@ interface NativeSnapshot {
   paused: boolean;
 }
 
+/**
+ * Quanto tempo uma busca pode ficar "em andamento" antes de a gente parar
+ * de esperar por ela.
+ *
+ * Existe porque nesta TV a busca pode nunca terminar: no <video> o
+ * `seeking` fica true pra sempre (é o bug do aparelho que trouxe o AVPlay
+ * pra cá), e no AVPlay o callback de conclusão pode não vir. Como o
+ * salvamento se recusa a rodar durante uma busca — a amostra seria de um
+ * ponto que não vale mais —, uma busca que não acaba significava NENHUM
+ * progresso salvo na sessão inteira depois do primeiro ±10s. Passado este
+ * tempo, a amostra atual é melhor que amostra nenhuma: o vídeo segue
+ * tocando e o tempo dele continua andando, buscando ou não.
+ */
+const BUSCA_TRAVADA_MS = 4000;
+
 export function useProgressPersistence({
   videoRef,
   // Opcional: quando dado (modo player nativo AVPlay, ver VideoPlayer.tsx),
@@ -41,13 +57,31 @@ export function useProgressPersistence({
   episodeId: string | null;
   saveProgress: SaveProgress;
 }) {
+  // Desde quando a busca atual está em andamento (null = não está).
+  const buscandoDesdeRef = useRef<number | null>(null);
+
+  /** true = dá pra salvar; false = tem busca em andamento, ainda dentro do prazo. */
+  const buscaAssentou = useCallback((buscando: boolean) => {
+    if (!buscando) {
+      buscandoDesdeRef.current = null;
+      return true;
+    }
+    if (buscandoDesdeRef.current === null) buscandoDesdeRef.current = Date.now();
+    return Date.now() - buscandoDesdeRef.current >= BUSCA_TRAVADA_MS;
+  }, []);
+
   const doSaveProgress = useCallback(() => {
     const nativo = nativeRef?.current;
     if (nativo) {
       // Mesmo cuidado do ramo <video> abaixo: `seeking` true = busca em
       // andamento, currentTime ainda não reflete o destino.
-      if (!nativo.duration || nativo.seeking) return;
+      if (!nativo.duration) {
+        logarServidor(`nao salvou: duracao=0 (t=${nativo.currentTime.toFixed(1)})`);
+        return;
+      }
+      if (!buscaAssentou(nativo.seeking)) return;
       const snapshot = { t: nativo.currentTime, d: nativo.duration };
+      logarServidor(`salvando progresso t=${snapshot.t.toFixed(1)}/${snapshot.d.toFixed(1)}`);
       setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
       return;
     }
@@ -64,10 +98,10 @@ export function useProgressPersistence({
     // o próximo episódio a resolver, sem progresso nenhum pra achar, viraria
     // o primeiro da série. Esperar a busca assentar evita salvar essa
     // amostra ruim; o intervalo de 5s abaixo tenta de novo em seguida.
-    if (v.seeking) return;
+    if (!buscaAssentou(v.seeking)) return;
     const snapshot = { t: v.currentTime, d: v.duration };
     setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
-  }, [videoRef, nativeRef, saveProgress, titleId, episodeId]);
+  }, [videoRef, nativeRef, saveProgress, titleId, episodeId, buscaAssentou]);
 
   useEffect(() => {
     const interval = setInterval(() => {
