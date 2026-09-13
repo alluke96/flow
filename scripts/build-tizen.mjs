@@ -59,6 +59,16 @@ const mover = [
   ["src/app/watch", "watch"], // idem
   ["src/app/tv", "tv"], // vira a página raiz (abaixo)
   ["src/app/page.tsx", "page.tsx"], // tela de perfis da web dá lugar ao app de TV
+  // Ícones de navegador: não existem em app de TV (quem define o ícone lá é
+  // o <icon> do config.xml) e o `icon.png` gerado ainda tem o MESMO NOME do
+  // ícone do app Samsung, que mora ao lado do config.xml — copiar por cima
+  // trocaria o ícone do app sem avisar. Tirando daqui, o Next nem chega a
+  // gerar os <link>, nem as entradas de metadata que o React reinsere na
+  // hidratação (que apontariam pra "/favicon.ico", caminho absoluto que de
+  // file:// nem existe).
+  ["src/app/icon.png", "icon.png"],
+  ["src/app/apple-icon.png", "apple-icon.png"],
+  ["src/app/favicon.ico", "favicon.ico"],
 ];
 
 function guardar() {
@@ -145,9 +155,29 @@ writeFileSync(
     .replace(/:HL\[\\"[^\]]*?\.woff2[^\]]*?\]/g, ":HL[]")
 );
 
-// O catálogo de demonstração (public/mock) só serve pro modo mock rodando no
-// PC — dentro do .wgt seria peso morto ocupando espaço na TV.
-rmSync(join(destino, "mock"), { recursive: true, force: true });
+// Peso morto dentro do widget:
+//  - mock/ é o catálogo de demonstração, só serve rodando no PC;
+//  - os .svg são o boilerplate que vem do template do Next;
+//  - os .txt/_not-found/404 são artefatos de roteamento de servidor, que
+//    não existe aqui: o app é uma tela só (ver src/app/tv/page.tsx).
+for (const lixo of [
+  "mock",
+  "file.svg",
+  "globe.svg",
+  "next.svg",
+  "vercel.svg",
+  "window.svg",
+  "404.html",
+  "index.txt",
+  "_not-found",
+  "_not-found.html",
+  "_not-found.txt",
+  "__next.__PAGE__.txt",
+  "__next._full.txt",
+  "__next._tree.txt",
+]) {
+  rmSync(join(destino, lixo), { recursive: true, force: true });
+}
 
 // Fonte embutida como data: URI. Um documento `file://` tem origem "null",
 // e fonte é um recurso que passa por CORS mesmo assim — o navegador recusa
