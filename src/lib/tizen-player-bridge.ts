@@ -118,6 +118,21 @@ function servidorPodeCortar(): Promise<boolean> {
   return promessaPodeCortar;
 }
 
+/**
+ * Pergunta ao servidor quantos segundos tem o vídeo (ver /api/duracao).
+ *
+ * Só entra em cena quando o vídeo vai chegar CORTADO e ninguém sabe a
+ * duração total: o stream cortado não carrega essa informação, e sem ela a
+ * barra abre vazia e o progresso deixa de ser salvo. A URL é derivada da do
+ * streaming porque é a mesma dupla título/episódio — muda só o nome da rota.
+ */
+function perguntarDuracao(urlDoStream: string): Promise<number> {
+  return fetch(urlDoStream.replace("/api/stream/", "/api/duracao/"))
+    .then((r) => r.json())
+    .then((d: { segundos?: number }) => (typeof d.segundos === "number" ? d.segundos : 0))
+    .catch(() => 0);
+}
+
 export function logarServidor(mensagem: string): void {
   // Só DENTRO do widget. Sem esta guarda, agora que o log é usado também
   // pelo salvamento de progresso (compartilhado com a web), todo navegador
@@ -195,8 +210,12 @@ export interface TizenPlayerApi {
   play(): void;
   pause(): void;
   seekTo(time: number): void;
-  /** ±N segundos a partir de onde está — ver o porquê na implementação. */
-  seekBy(delta: number): void;
+  /**
+   * ±N segundos a partir de onde está — ver o porquê na implementação.
+   * Devolve o ponto de destino em segundos, pra interface poder mostrar
+   * ele NA HORA em vez de esperar o espelho do estado dar a volta.
+   */
+  seekBy(delta: number): number;
   setRect(x: number, y: number, width: number, height: number): void;
   setSpeed(rate: number): void;
   close(): void;
@@ -288,7 +307,12 @@ export function useTizenPlayer(): UseTizenPlayerResult {
               // demais (a reabertura também não pegou): de um jeito ou de
               // outro, voltar a mostrar o tempo real é melhor que uma barra
               // congelada num ponto onde o vídeo não está.
-              const chegou = Math.abs(absoluto - alvo) < 5;
+              // `ms > 0` separa "já está tocando lá" de "ainda nem
+              // começou": num stream cortado o tempo do player nasce em
+              // zero, e sem esta condição o destino era largado logo na
+              // abertura — a barra voltava a seguir um tempo que ainda não
+              // existia, tremendo até o vídeo começar de verdade.
+              const chegou = ms > 0 && Math.abs(absoluto - alvo) < 5;
               const cansou = Date.now() - alvoPendenteDesdeRef.current > LIMITE_ALVO_PENDENTE_MS;
               if (chegou || cansou) alvoPendenteRef.current = null;
             }
@@ -397,9 +421,14 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       if (!avplay) return;
       fechar();
       if (duracaoConhecida && duracaoConhecida > 0) duracaoConhecidaRef.current = duracaoConhecida;
-      // `fechar` zera o espelho: abrir é sempre carregar alguma coisa, e a
-      // interface tem que mostrar isso desde o primeiro instante.
+      // `fechar` zera o espelho, e é entre ele e o primeiro tempo que o
+      // player novo reporta que a barra dava um salto feio: por um instante
+      // voltava pro zero, ou misturava o tempo do stream antigo com o
+      // deslocamento do novo. Semear o espelho com o ponto de destino
+      // segura a barra parada onde ela vai ficar.
       estadoRef.current.buffering = true;
+      estadoRef.current.currentTime = Math.max(0, startTime);
+      estadoRef.current.duration = duracaoConhecidaRef.current;
 
       urlRef.current = url;
       // Pedir o vídeo JÁ COMEÇANDO no ponto é o que substitui a busca neste
@@ -410,6 +439,15 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       const urlFinal = cortarNoServidor
         ? `${url}${url.includes("?") ? "&" : "?"}inicio=${offsetRef.current}&tv=1`
         : url;
+
+      if (cortarNoServidor && !duracaoConhecidaRef.current) {
+        perguntarDuracao(url).then((segundos) => {
+          if (segundos > 0) {
+            duracaoConhecidaRef.current = segundos;
+            logarServidor(`duracao do episodio pelo servidor: ${segundos}s`);
+          }
+        });
+      }
 
       try {
         logarServidor(`abrindo ${urlFinal}`);
@@ -666,7 +704,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       seekTo: buscar,
       seekBy(delta) {
         const avplay = pegarAvplay();
-        if (!avplay || !abertoRef.current) return;
+        if (!avplay || !abertoRef.current) return estadoRef.current.currentTime;
         const ms = Math.round(Math.abs(delta) * 1000);
         // O ponto de partida é o pulo que já está no forno, se houver:
         // apertar +10s cinco vezes seguidas tem que somar 50s, não repetir
@@ -699,9 +737,10 @@ export function useTizenPlayer(): UseTizenPlayerResult {
           } catch (e) {
             recusou(e);
           }
-          return;
+          return alvo;
         }
         buscar(alvo);
+        return alvo;
       },
       setRect(x, y, width, height) {
         rectRef.current = { x, y, width, height };

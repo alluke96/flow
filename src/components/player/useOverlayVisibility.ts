@@ -21,12 +21,23 @@ export function useOverlayVisibility(
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleHide = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      const v = videoRef.current;
-      const tocando = nativeRef ? !nativeRef.current.paused : Boolean(v && !v.paused);
-      if (tocando) setOverlayHidden(true);
-    }, OVERLAY_HIDE_MS);
+    function agendar() {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = setTimeout(() => {
+        const v = videoRef.current;
+        const tocando = nativeRef ? !nativeRef.current.paused : Boolean(v && !v.paused);
+        if (tocando) {
+          setOverlayHidden(true);
+          return;
+        }
+        // Ainda não começou: tenta de novo em vez de desistir. Desistir
+        // deixava os controles na tela pra SEMPRE quando o vídeo demorava
+        // mais que este intervalo pra começar — que é justo o caso de quem
+        // retoma de onde parou na TV, onde o trecho é preparado na hora.
+        agendar();
+      }, OVERLAY_HIDE_MS);
+    }
+    agendar();
   }, [videoRef, nativeRef]);
 
   const showOverlay = useCallback(() => {

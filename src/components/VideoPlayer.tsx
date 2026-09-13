@@ -142,9 +142,12 @@ export function VideoPlayer({
         // (ver seekBy em tizen-player-bridge.ts). O valor abaixo é só o
         // palpite que a barra mostra até o espelho trazer o tempo de
         // verdade, no próximo quarto de segundo.
-        tz.api.seekBy(delta);
-        const max = tzStateRef.current.duration || Infinity;
-        setCurrentTime(Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max));
+        // O destino vem de quem fez a conta (o bridge soma a partir do
+        // pulo anterior, se houver um no forno). Calcular de novo aqui,
+        // a partir do tempo que está tocando, dava dois números
+        // diferentes em toques rápidos — a bolinha ia pra um lugar e,
+        // um quarto de segundo depois, pulava pra outro.
+        setCurrentTime(tz.api.seekBy(delta));
         showOverlay();
         return;
       }
