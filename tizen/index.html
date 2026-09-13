@@ -25,6 +25,22 @@
   }
   #splash small { font-size: 24px; color: #8c8c8c; }
 
+  /* Log da CASCA na própria tela — sdb dlog/dlogutil não devolvem nada
+     nesta TV (bloqueado mesmo com Developer Mode ligado, comum em TV de
+     varejo), então isto substitui o console por algo visível sem PC
+     nenhum. Fica DEPOIS do #flow no HTML de propósito: elementos mais
+     tarde no documento desenham por cima dos anteriores mesmo sem
+     z-index, então aparece por cima do app carregado no iframe.
+     pointer-events:none garante que nunca atrapalha nenhum toque. */
+  #cascaLog {
+    position: fixed; left: 8px; bottom: 8px; z-index: 999999;
+    max-width: 46%; max-height: 42vh; overflow: hidden;
+    background: rgba(0,0,0,0.85); color: #7ee787;
+    font: 12px/1.4 monospace; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid #7ee787; white-space: pre-wrap;
+    pointer-events: none;
+  }
+
   /* Ligado pelo próprio Flow (dentro do iframe) enquanto o AVPlay está
      tocando — ver bloco "Ponte pro AVPlay" abaixo. O vídeo de verdade é
      desenhado pela TV NUM PLANO DE HARDWARE ATRÁS desta página inteira,
@@ -45,19 +61,43 @@
 
 <iframe id="flow" allow="autoplay; fullscreen; encrypted-media"></iframe>
 
+<div id="cascaLog"></div>
+
 <script>
 (function () {
   "use strict";
 
-  // Se ALGUMA linha antes de registrar o listener de message lançar sem
-  // ninguém pegar, o script inteiro para ali — e o listener nunca chega a
-  // existir, explicando "postMessage recebidos: 0" sem erro nenhum visível
-  // (não tem DevTools nesta TV pra mostrar). Isto pelo menos deixa o erro
-  // visível no log do sistema (ver "log" mais abaixo).
+  // Duas saídas ao mesmo tempo: console.log (tentativa via sdb dlog, que
+  // nesta TV não devolveu nada — bloqueado mesmo com Developer Mode ligado,
+  // parece ser comum em TV de varejo) e um log VISÍVEL na própria tela
+  // (#cascaLog), que não depende de PC/sdb/DevTools nenhum. Existe porque o
+  // postMessage entre a casca e o iframe está aparentemente não entregando
+  // NADA (overlay de debug do app mostrou "postMessage recebidos: 0") —
+  // sem isto não tinha como saber se a casca sequer tenta mandar, ou tenta
+  // e falha, ou nem chega a rodar até esse ponto.
+  //
+  // Fica logo no topo do arquivo, ANTES de qualquer outra coisa (inclusive
+  // do listener de "error" logo abaixo) de propósito: se alguma linha mais
+  // adiante lançar sem ninguém pegar, o script inteiro para ali — e é
+  // exatamente esse erro que precisa aparecer, então "log" tem que já
+  // existir e funcionar antes de qualquer coisa que possa quebrar.
+  var logEl = document.getElementById("cascaLog");
+  var logLinhas = [];
+  function log() {
+    var args = Array.prototype.slice.call(arguments);
+    var texto = args
+      .map(function (a) {
+        return typeof a === "string" ? a : JSON.stringify(a);
+      })
+      .join(" ");
+    try { console.log.apply(console, ["[FlowAVPlay]"].concat(args)); } catch (e) {}
+    logLinhas.push(texto);
+    if (logLinhas.length > 16) logLinhas.shift();
+    if (logEl) logEl.textContent = logLinhas.join("\n");
+  }
+
   window.addEventListener("error", function (e) {
-    try {
-      console.log("[FlowAVPlay] ERRO NÃO TRATADO:", e.message, "em", e.filename + ":" + e.lineno);
-    } catch (e2) {}
+    log("ERRO NÃO TRATADO:", e.message, "em", e.filename + ":" + e.lineno);
   });
 
   // ------------------------------------------------------------------
@@ -71,19 +111,6 @@
   var splash = document.getElementById("splash");
   document.getElementById("alvo").textContent = URL_FLOW;
 
-  // Prefixo fixo pra filtrar no log do sistema via sdb (não tem DevTools
-  // nesta TV): "sdb dlog | findstr FlowAVPlay" (Windows) ou
-  // "sdb dlog | grep FlowAVPlay" (mac/Linux) enquanto o app roda. Existe
-  // só porque o postMessage entre a casca e o iframe está aparentemente
-  // não entregando NADA (overlay de debug mostrou "postMessage
-  // recebidos: 0") — sem isto não tinha como saber se o problema é a
-  // casca nem tentar mandar, ou mandar e falhar silenciosamente.
-  function log() {
-    try {
-      var args = Array.prototype.slice.call(arguments);
-      console.log.apply(console, ["[FlowAVPlay]"].concat(args));
-    } catch (e) {}
-  }
   log("casca iniciando, URL_FLOW =", URL_FLOW);
 
   // Teclas de mídia do controle não chegam ao app sem registro explícito.
@@ -144,7 +171,7 @@
   // próprio overlay de debug do app, que a versão da CASCA instalada na TV
   // é de fato a que você acabou de reinstalar (em vez de confiar só em "eu
   // reinstalei"). Muda este texto sempre que mexer neste arquivo.
-  var CASCA_VERSAO = "avplay-3";
+  var CASCA_VERSAO = "avplay-4";
 
   var AVPLAY_CANAL = "flow-tizen-avplay";
   var avplayAberto = false;
