@@ -214,6 +214,29 @@ O build do widget marca o `<html>` com a classe `tv-widget` (ver
   Na web isso tudo está escrito em `:focus-visible`, que esta TV não
   conhece, então aparece repetido ali em `:focus`.
 
+## Busca (seek) nesta TV
+
+O AVPlay **recusa toda busca com a mídia rodando** neste aparelho:
+`PLAYER_ERROR_INVALID_STATE`, imediato, sem nem chegar a pedir nada pro
+servidor — em `PLAYING`, em `READY`, pelo `seekTo` e pelos
+`jumpForward`/`jumpBackward`, mesmo pra 10s à frente. (O `<video>` da TV
+tem o seu próprio jeito de falhar no mesmo ponto, que foi o que trouxe o
+AVPlay pra cá.) O servidor está fora dessa história: responde 206 com
+`Content-Range` e `Content-Length` certos, e nada disso chega a ser
+pedido.
+
+O que a TV aceita é dizer a posição **antes** de preparar o stream —
+`seekTo` logo depois do `open`, com o player ainda em IDLE, que é como a
+Samsung documenta "começar de tal ponto". É esse o caminho que o
+`tizen-player-bridge.ts` usa pra retomar de onde parou.
+
+Daí sai o plano B pro ±10s e pra barra de progresso: quando a busca é
+recusada, o vídeo é **reaberto já no ponto pedido**. Custa alguns segundos
+de recarga, e por isso toques seguidos são juntados (apertar +10s cinco
+vezes vira uma reabertura em +50s, não cinco recarregamentos). Onde a
+busca normal funciona — qualquer outro aparelho —, nada disso chega a
+rodar.
+
 ## Limitação conhecida
 
 AVPlay não expõe volume por instância (é sempre o volume do sistema,

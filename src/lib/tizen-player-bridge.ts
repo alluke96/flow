@@ -127,7 +127,14 @@ function pegarAvplay(): AVPlay | null {
 const INTERVALO_ESTADO_MS = 250;
 // Teto pra esperar o seek de retomada antes de dar play assim mesmo — mesma
 // ideia (e mesmo valor) do caminho do <video>, ver RESUME_SEEK_TIMEOUT_MS.
-const TIMEOUT_SEEK_RETOMADA_MS = 3000;
+/**
+ * Quanto esperar antes de reabrir o vídeo no ponto pedido, depois que a TV
+ * recusa uma busca. Serve pra juntar vários toques seguidos no ±10s numa
+ * reabertura só — sem isso, cinco toques seriam cinco recarregamentos.
+ */
+const ATRASO_REABERTURA_MS = 900;
+/** Teto pra barra ficar parada no ponto pedido esperando a reabertura. */
+const LIMITE_ALVO_PENDENTE_MS = 20000;
 /** De quanto em quanto tempo o player nativo se reporta pro flow.log. */
 const BATIMENTO_MS = 10000;
 /** Quanto esperar, já tocando, pra conferir se a retomada pegou. */
@@ -189,6 +196,13 @@ export function useTizenPlayer(): UseTizenPlayerResult {
   // estado do React (ver INTERVALO_ESTADO_MS).
   const estadoRef = useRef<TizenPlayerState>({ ...ESTADO_INICIAL });
   const abertoRef = useRef(false);
+  const urlRef = useRef<string | null>(null);
+  // Ponto pra onde o vídeo está indo por REABERTURA (ver agendarReabertura):
+  // enquanto está marcado, é ele que a interface mostra, não o tempo do
+  // player — que ainda é o de antes do pulo, ou zero durante a recarga.
+  const alvoPendenteRef = useRef<number | null>(null);
+  const alvoPendenteDesdeRef = useRef(0);
+  const timerReaberturaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
@@ -222,7 +236,22 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       if (avplay && abertoRef.current) {
         try {
           const ms = avplay.getCurrentTime();
-          if (typeof ms === "number" && ms >= 0) estadoRef.current.currentTime = ms / 1000;
+          if (typeof ms === "number" && ms >= 0) {
+            const alvo = alvoPendenteRef.current;
+            const desistiuDeEsperar = Date.now() - alvoPendenteDesdeRef.current > LIMITE_ALVO_PENDENTE_MS;
+            if (alvo === null) {
+              estadoRef.current.currentTime = ms / 1000;
+            } else if (Math.abs(ms / 1000 - alvo) < 5 || desistiuDeEsperar) {
+              // Chegou onde foi pedido — ou não chegou e já passou tempo
+              // demais (a reabertura também não pegou): de um jeito ou de
+              // outro, voltar a mostrar o tempo real é melhor que uma barra
+              // congelada num ponto onde o vídeo não está.
+              alvoPendenteRef.current = null;
+              estadoRef.current.currentTime = ms / 1000;
+            } else {
+              estadoRef.current.currentTime = alvo;
+            }
+          }
           const durMs = avplay.getDuration();
           if (typeof durMs === "number" && durMs > 0) estadoRef.current.duration = durMs / 1000;
         } catch {
@@ -277,12 +306,31 @@ export function useTizenPlayer(): UseTizenPlayerResult {
     estadoRef.current = { ...ESTADO_INICIAL };
   }, []);
 
+  /**
+   * Fechar de verdade (sair do player), diferente do `fechar` acima, que
+   * também é usado ENTRE duas aberturas do mesmo vídeo (a reabertura). Aqui
+   * é a hora de esquecer a URL e cancelar qualquer reabertura no forno.
+   */
+  const fecharDeVez = useCallback(() => {
+    if (timerReaberturaRef.current) {
+      clearTimeout(timerReaberturaRef.current);
+      timerReaberturaRef.current = null;
+    }
+    alvoPendenteRef.current = null;
+    urlRef.current = null;
+    fechar();
+  }, [fechar]);
+
   const abrir = useCallback(
     (url: string, startTime: number) => {
       const avplay = pegarAvplay();
       if (!avplay) return;
       fechar();
+      // `fechar` zera o espelho: abrir é sempre carregar alguma coisa, e a
+      // interface tem que mostrar isso desde o primeiro instante.
+      estadoRef.current.buffering = true;
 
+      urlRef.current = url;
       try {
         logarServidor(`abrindo ${url}`);
         avplay.open(url);
@@ -325,120 +373,57 @@ export function useTizenPlayer(): UseTizenPlayerResult {
 
         abertoRef.current = true;
 
+        // POSIÇÃO INICIAL: seekTo AQUI, com a mídia aberta mas ainda NÃO
+        // preparada (estado IDLE). É o caminho que a Samsung documenta pra
+        // "começar de tal ponto", e é outro caminho no aparelho: a posição
+        // entra na própria preparação do stream, em vez de pedir ao
+        // decodificador que já está rodando pra pular. Esta TV recusa o
+        // segundo (PLAYER_ERROR_INVALID_STATE em qualquer busca, mesmo
+        // tocando, mesmo 10s à frente), e era por isso que "continuar
+        // assistindo" recomeçava do zero.
+        const alvoMs = Math.round(startTime * 1000);
+        if (startTime > 1) {
+          try {
+            avplay.seekTo(alvoMs);
+            logarServidor(`posicao inicial ${alvoMs}ms pedida antes do prepare`);
+          } catch (e) {
+            logarServidor(`posicao inicial ${alvoMs}ms recusada: ${descreverErro(e)}`);
+          }
+        }
+
         avplay.prepareAsync(
           () => {
             const duracaoMs = avplay.getDuration();
             estadoRef.current.duration = duracaoMs / 1000;
             logarServidor(`preparado: duracao=${(duracaoMs / 1000).toFixed(1)}s retomar=${startTime.toFixed(1)}s`);
 
-            function comecar() {
-              // Relê o objeto em vez de fechar sobre o `avplay` de fora:
-              // dentro de uma function declaration o TypeScript não mantém
-              // o estreitamento de tipo do null-check lá de cima.
-              const player = pegarAvplay();
-              if (!player) return;
+            const player = pegarAvplay();
+            if (player) {
               try {
                 player.play();
-              } catch {
-                // se play() falhar aqui, o estado de erro do listener é
-                // quem vai contar a história — não adianta insistir
+              } catch (e) {
+                logarServidor(`play() apos preparar falhou: ${descreverErro(e)}`);
               }
-              estadoRef.current.paused = false;
-              estadoRef.current.seeking = false;
             }
+            estadoRef.current.paused = false;
+            estadoRef.current.seeking = false;
 
-            // Retomada ("continuar assistindo"): busca ANTES de tocar, com
-            // uma reconferência se pousar longe do pedido, e um teto de
-            // tempo pra nunca ficar preso esperando um callback que pode
-            // não vir. Mesma lógica do caminho do <video> (ver
-            // useResumePlayback).
-            const alvoMs = Math.round(startTime * 1000);
-            // `duracaoMs` pode vir 0 aqui: em stream progressivo a duração
-            // às vezes só fica conhecida um pouco DEPOIS do prepare. Sem
-            // esta ressalva, a comparação com a duração reprovava a
-            // retomada e o episódio recomeçava do zero — exatamente o
-            // "continuar assistindo não funciona" na TV. O ponto salvo veio
-            // de uma sessão em que ele era válido; o laço de espelho lá de
-            // cima conserta a duração assim que o player souber.
-            const semDuracao = !(duracaoMs > 0);
-            if (startTime > 1 && (semDuracao || alvoMs < duracaoMs - 2000)) {
-              estadoRef.current.seeking = true;
-              let tentouDeNovo = false;
-              let comecou = false;
-
-              // Confere DEPOIS de já estar tocando se a retomada pegou, e
-              // tenta de novo se não pegou. O motivo de a segunda tentativa
-              // valer a pena é que ela acontece num estado diferente do
-              // player: a primeira é com a mídia só preparada (READY), esta
-              // é com ela tocando (PLAYING) — e busca é a operação que mais
-              // varia de um estado pro outro. Se as duas falharem, o log
-              // diz em quanto o vídeo realmente ficou, que é a diferença
-              // entre "a TV recusou a busca" e "a gente pediu errado".
-              const conferirRetomada = () => {
-                const player = pegarAvplay();
-                if (!player || !abertoRef.current) return;
-                let atualMs: number;
+            // Confere, já tocando, se a posição inicial pegou. Não tenta
+            // consertar: se não pegou, buscar agora seria justamente a
+            // operação que esta TV recusa. Serve pro log dizer, da próxima
+            // vez, qual das duas coisas aconteceu.
+            if (startTime > 1) {
+              setTimeout(() => {
+                const p2 = pegarAvplay();
+                if (!p2 || !abertoRef.current) return;
                 try {
-                  atualMs = player.getCurrentTime();
+                  const atualMs = p2.getCurrentTime();
+                  const pegou = Math.abs(atualMs - alvoMs) <= 5000;
+                  logarServidor(`retomada ${pegou ? "ok" : "NAO pegou"}: pedi ${alvoMs}ms, estou em ${atualMs}ms`);
                 } catch (e) {
                   logarServidor(`retomada: getCurrentTime falhou: ${descreverErro(e)}`);
-                  return;
                 }
-                if (Math.abs(atualMs - alvoMs) <= 5000) {
-                  logarServidor(`retomada ok: pedi ${alvoMs}ms, estou em ${atualMs}ms`);
-                  return;
-                }
-                logarServidor(`retomada nao pegou: pedi ${alvoMs}ms, estou em ${atualMs}ms — tentando tocando`);
-                estadoRef.current.seeking = true;
-                const pronto = () => {
-                  estadoRef.current.seeking = false;
-                };
-                try {
-                  player.seekTo(
-                    alvoMs,
-                    () => {
-                      pronto();
-                      logarServidor("retomada na 2a tentativa: aceita");
-                    },
-                    (erro) => {
-                      pronto();
-                      logarServidor(`retomada na 2a tentativa falhou: ${descreverErro(erro)}`);
-                    }
-                  );
-                } catch (e) {
-                  pronto();
-                  logarServidor(`retomada na 2a tentativa lancou: ${descreverErro(e)}`);
-                }
-              };
-
-              function comecarERetomar() {
-                comecar();
-                setTimeout(conferirRetomada, ESPERA_CONFERIR_RETOMADA_MS);
-              }
-
-              const desistir = setTimeout(() => {
-                if (!comecou) {
-                  comecou = true;
-                  logarServidor(`retomada: nenhum retorno da busca em ${TIMEOUT_SEEK_RETOMADA_MS}ms, tocando assim mesmo`);
-                  comecarERetomar();
-                }
-              }, TIMEOUT_SEEK_RETOMADA_MS);
-
-              const aposSeek = () => {
-                if (comecou) return;
-                const atualMs = avplay.getCurrentTime();
-                if (Math.abs(atualMs - alvoMs) > 5000 && !tentouDeNovo) {
-                  tentouDeNovo = true;
-                  avplay.seekTo(alvoMs, aposSeek, aposSeek);
-                  return;
-                }
-                comecou = true;
-                clearTimeout(desistir);
-                comecarERetomar();
-              };
-              avplay.seekTo(alvoMs, aposSeek, aposSeek);
-            } else {
-              comecar();
+              }, ESPERA_CONFERIR_RETOMADA_MS);
             }
           },
           (erro) => {
@@ -459,39 +444,84 @@ export function useTizenPlayer(): UseTizenPlayerResult {
    * chamar de lá por `this` quebraria assim que alguém guardasse o método
    * numa variável.
    */
-  const buscar = useCallback((time: number) => {
-    const avplay = pegarAvplay();
-    if (!avplay || !abertoRef.current) return;
-    // `seeking` PRECISA voltar pra false em todos os caminhos —
-    // sucesso, erro e exceção. Travado em true, doSaveProgress (ver
-    // useProgressPersistence, ramo nativo) se recusa a salvar
-    // progresso, e aí nenhum save da sessão inteira acontece depois do
-    // primeiro ±10s: nem o periódico de 5s, nem o final ao sair. O
-    // efeito prático é "continuar assistindo" resumindo de bem antes
-    // do primeiro seek, quase sempre perto do início (pular a abertura
-    // costuma ser a primeira coisa que se faz). Foi exatamente esse o
-    // bug na versão anterior deste bridge, que passava só o callback de
-    // sucesso.
-    estadoRef.current.seeking = true;
-    const pronto = () => {
-      estadoRef.current.seeking = false;
-    };
-    try {
-      const alvoMs = Math.round(time * 1000);
-      logarServidor(`seekTo pedido: ${estadoRef.current.currentTime.toFixed(1)}s -> ${time.toFixed(1)}s`);
-      avplay.seekTo(alvoMs, pronto, (erro) => {
+  /**
+   * Plano B pra busca: reabrir o vídeo já no ponto pedido.
+   *
+   * Existe porque esta TV recusa TODA busca com a mídia rodando —
+   * PLAYER_ERROR_INVALID_STATE mesmo em PLAYING, mesmo 10s à frente, mesmo
+   * pelos métodos de salto que a Samsung fez pra isso. O que ela aceita é
+   * dizer a posição ANTES de preparar o stream (ver `abrir`). Então é isso
+   * que se faz: fecha e abre de novo começando de lá.
+   *
+   * O custo é a recarga (alguns segundos de tela parada); o ganho é ±10s e
+   * arrastar a barra passarem a funcionar em vez de não fazer nada. Onde a
+   * busca normal funciona, nada disto chega a rodar.
+   *
+   * O atraso junta toques seguidos: apertar +10s cinco vezes vira uma
+   * reabertura em +50s, não cinco recarregamentos.
+   */
+  const agendarReabertura = useCallback(
+    (alvo: number) => {
+      const url = urlRef.current;
+      if (!url) return;
+      alvoPendenteRef.current = alvo;
+      alvoPendenteDesdeRef.current = Date.now();
+      estadoRef.current.currentTime = alvo;
+      // Spinner na hora: a reabertura demora alguns segundos, e sem sinal
+      // nenhum o botão parece não ter feito nada de novo.
+      estadoRef.current.buffering = true;
+      if (timerReaberturaRef.current) clearTimeout(timerReaberturaRef.current);
+      timerReaberturaRef.current = setTimeout(() => {
+        timerReaberturaRef.current = null;
+        const destino = alvoPendenteRef.current;
+        if (destino === null || !urlRef.current) return;
+        logarServidor(`reabrindo em ${destino.toFixed(1)}s (a TV recusou a busca)`);
+        abrir(urlRef.current, destino);
+      }, ATRASO_REABERTURA_MS);
+    },
+    [abrir]
+  );
+
+  /**
+   * Busca ABSOLUTA (retomada, arrastar a barra). Fica fora do objeto `api`
+   * porque o salto relativo também precisa dela, e chamar de lá por `this`
+   * quebraria assim que alguém guardasse o método numa variável.
+   */
+  const buscar = useCallback(
+    (time: number) => {
+      const avplay = pegarAvplay();
+      if (!avplay || !abertoRef.current) return;
+      // `seeking` PRECISA voltar pra false em todos os caminhos — sucesso,
+      // erro e exceção. Travado em true, doSaveProgress (ver
+      // useProgressPersistence, ramo nativo) se recusa a salvar progresso.
+      estadoRef.current.seeking = true;
+      const pronto = () => {
+        estadoRef.current.seeking = false;
+      };
+      // Falha de busca não é falha de reprodução: o vídeo segue tocando de
+      // onde estava, então NÃO vira `error` (que jogaria a tela de "não foi
+      // possível reproduzir" por cima de um vídeo que está tocando). Vai
+      // pro log, e o ponto pedido vira uma reabertura.
+      const recusou = (erro: unknown) => {
         pronto();
-        // Falha de busca não é falha de reprodução: o vídeo segue
-        // tocando de onde estava, então NÃO vira `error` (que jogaria
-        // a tela de "não foi possível reproduzir" por cima de um vídeo
-        // que está tocando). Registra no log do servidor, que é a
-        // única janela pra dentro do widget.
-        logarServidor(`seekTo(${Math.round(time * 1000)}ms) falhou: ${String(erro)}`);
-      });
-    } catch (e) {
-      pronto();
-      logarServidor(`seekTo lançou: ${String(e)}`);
-    }
+        logarServidor(`seekTo(${Math.round(time * 1000)}ms) recusado em ${estadoNativo(avplay)}: ${descreverErro(erro)}`);
+        agendarReabertura(time);
+      };
+      try {
+        logarServidor(`seekTo pedido: ${estadoRef.current.currentTime.toFixed(1)}s -> ${time.toFixed(1)}s`);
+        avplay.seekTo(Math.round(time * 1000), pronto, recusou);
+      } catch (e) {
+        recusou(e);
+      }
+    },
+    [agendarReabertura]
+  );
+
+  // Não deixa uma reabertura agendada disparar depois que o player saiu.
+  useEffect(() => {
+    return () => {
+      if (timerReaberturaRef.current) clearTimeout(timerReaberturaRef.current);
+    };
   }, []);
 
   const api = useMemo<TizenPlayerApi>(
@@ -522,38 +552,40 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         const avplay = pegarAvplay();
         if (!avplay || !abertoRef.current) return;
         const ms = Math.round(Math.abs(delta) * 1000);
-        // jumpForward/jumpBackward são os métodos que a Samsung criou pra
-        // exatamente este caso, e a razão de preferi-los ao seekTo é que
-        // eles não dependem de a gente saber onde o vídeo está: o cálculo
-        // "de onde estou + 10s" acontece dentro do player. Se o tempo que
-        // a gente tem estivesse errado (era o caso enquanto o espelho
-        // dependia só do callback), um seekTo mandaria o vídeo pra um
-        // lugar qualquer — e "pra 10s" parece, de longe, um botão que não
-        // faz nada.
+        // O ponto de partida é o pulo que já está no forno, se houver:
+        // apertar +10s cinco vezes seguidas tem que somar 50s, não repetir
+        // os mesmos 10s cinco vezes (ver agendarReabertura).
+        const base = alvoPendenteRef.current ?? estadoRef.current.currentTime;
+        const teto = estadoRef.current.duration || Infinity;
+        const alvo = Math.min(Math.max(0, base + delta), teto);
+
+        // jumpForward/jumpBackward são os métodos que a Samsung fez pra
+        // este caso, e o cálculo acontece dentro do player. Nesta TV eles
+        // são recusados como qualquer outra busca, e aí o pedido vira uma
+        // reabertura no ponto — mas tentar primeiro é o certo: onde a busca
+        // funciona, ela é instantânea e sem recarregar nada.
         const pular = delta >= 0 ? avplay.jumpForward : avplay.jumpBackward;
         estadoRef.current.seeking = true;
         const pronto = () => {
           estadoRef.current.seeking = false;
         };
-        const falhou = (erro: unknown) => {
+        const recusou = (erro: unknown) => {
           pronto();
           logarServidor(
-            `${delta >= 0 ? "jumpForward" : "jumpBackward"}(${ms}ms) falhou em ${estadoNativo(avplay)}: ${descreverErro(erro)}`
+            `${delta >= 0 ? "jumpForward" : "jumpBackward"}(${ms}ms) recusado em ${estadoNativo(avplay)}: ${descreverErro(erro)}`
           );
+          agendarReabertura(alvo);
         };
         if (pular) {
           try {
-            pular.call(avplay, ms, pronto, falhou);
-                logarServidor(
-          `pulo de ${delta}s pedido em t=${estadoRef.current.currentTime.toFixed(1)} (${estadoNativo(avplay)})`
-        );
-            return;
+            pular.call(avplay, ms, pronto, recusou);
+            logarServidor(`pulo de ${delta}s pedido em t=${base.toFixed(1)} (${estadoNativo(avplay)})`);
           } catch (e) {
-            // modelo sem suporte: cai no seekTo abaixo, que ao menos tenta
-            falhou(e);
+            recusou(e);
           }
+          return;
         }
-        buscar(Math.max(0, estadoRef.current.currentTime + delta));
+        buscar(alvo);
       },
       setRect(x, y, width, height) {
         rectRef.current = { x, y, width, height };
@@ -579,9 +611,9 @@ export function useTizenPlayer(): UseTizenPlayerResult {
           logarServidor(`setSpeed(${rate}) falhou em ${estadoNativo(avplay)}: ${descreverErro(e)}`);
         }
       },
-      close: fechar,
+      close: fecharDeVez,
     }),
-    [abrir, fechar, buscar]
+    [abrir, fecharDeVez, buscar, agendarReabertura]
   );
 
   const shellVersion = useMemo(
