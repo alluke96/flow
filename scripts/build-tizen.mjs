@@ -94,7 +94,15 @@ try {
   // a página raiz do export passa a ser o app de tela única
   cpSync(join(guardados, "tv", "page.tsx"), join(raiz, "src/app/page.tsx"));
 
-  execFileSync("npx", ["next", "build"], {
+  // Chama o binário do Next pelo próprio Node, em vez de "npx next build":
+  // no Windows o executável é `npx.cmd`, e execFileSync não resolve
+  // extensão do PATHEXT nem passa por shell — dava `spawnSync npx ENOENT`.
+  // Assim funciona igual nos dois sistemas, sem shell no meio.
+  const binNext = join(raiz, "node_modules", "next", "dist", "bin", "next");
+  if (!existsSync(binNext)) {
+    throw new Error(`Next não encontrado em ${binNext} — rodou \`npm ci\` neste diretório?`);
+  }
+  execFileSync(process.execPath, [binNext, "build"], {
     cwd: raiz,
     stdio: "inherit",
     env: {
