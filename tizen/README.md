@@ -104,17 +104,26 @@ inteira (não dentro do DOM), tanto esta casca quanto o app dentro do
 iframe ficam com o fundo transparente enquanto ele toca — sem isso, a cor
 de fundo normal do site tampa o vídeo por completo, sem erro nenhum.
 
-**Depurando a casca sem DevTools:** o script desta casca loga tudo que
-importa (`console.log`) com o prefixo `[FlowAVPlay]` — inclusive qualquer
-erro não tratado que pare o script antes mesmo do handshake começar. Com a
-TV conectada por `sdb` (`sdb connect <ip-da-tv>`), dá pra ver esse log ao
-vivo enquanto o app roda:
-```
-sdb dlog | findstr FlowAVPlay
-```
-(troque `findstr` por `grep` fora do Windows). O overlay de debug do
-próprio app (5 toques na versão) mostra o lado de DENTRO do iframe —
-juntando os dois dá pra ver a troca de mensagens dos dois lados ao mesmo
+**Depurando a casca sem DevTools:** nesta TV nem `sdb dlog`/`dlogutil`
+devolvem nada (bloqueado mesmo com Developer Mode ligado — parece comum em
+TV de varejo/produção), nem um log desenhado na própria tela é confiável
+(o `<iframe>` do Flow, uma vez com conteúdo carregado, desenha por cima de
+QUALQUER elemento irmão nesta TV, ignorando `z-index` e até o próprio
+tamanho declarado em CSS — bug de navegador antigo, não específico desta
+TV, sem contorno via CSS).
+
+O que funciona: a casca manda cada log que geraria pro próprio servidor do
+Flow via `GET /api/tizen-debug?msg=...` (não lê a resposta, só dispara —
+não depende de CORS, tela, `sdb` nem `postMessage` nenhum). Esses logs
+caem direto no `flow.log` de sempre, prefixados com `[tizen-debug]` —
+mesmo lugar onde já dá pra ver os logs de streaming (ver
+`src/lib/log.ts`/`stream-utils.ts` no repo). Enquanto testa a casca, deixe
+um `Get-Content C:\flow-secrets\flow.log -Wait -Tail 50 | Select-String
+tizen-debug` (PowerShell) rodando.
+
+O overlay de debug do próprio app (5 toques na versão) mostra o lado de
+DENTRO do iframe — juntando os dois (flow.log pro lado da casca, overlay
+pro lado do app) dá pra ver a troca de mensagens dos dois lados ao mesmo
 tempo.
 
 ## Atualizando

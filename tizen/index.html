@@ -8,22 +8,12 @@
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #000; overflow: hidden;
   }
-  /* O iframe ocupa quase a tela inteira — visualmente é quase
-     indistinguível do app "nativo", mas o documento de cima continua
-     sendo o app Tizen — é isso que mantém o controle no modo D-pad em vez
-     de virar ponteiro.
-
-     ALTURA REDUZIDA (não 100%) de propósito, só enquanto durar esta
-     depuração: um <iframe> com conteúdo carregado desenha por cima de
-     QUALQUER irmão, não importa z-index nem ordem no HTML — é um bug de
-     navegador antigo e bem documentado (ver bug 91516/43410 do Firefox),
-     não algo específico desta TV. Nenhum truque de CSS resolve enquanto
-     as duas áreas se sobrepõem — só dá pra ver #cascaLog se ele estiver
-     numa faixa da tela que o iframe genuinamente não ocupa. Volte pra
-     100% depois de achar o problema do postMessage. */
+  /* O iframe ocupa a tela inteira: visualmente é indistinguível do app
+     "nativo", mas o documento de cima continua sendo o app Tizen — é isso
+     que mantém o controle no modo D-pad em vez de virar ponteiro. */
   #flow {
-    position: absolute; top: 0; left: 0; right: 0;
-    height: calc(100% - 140px); border: 0;
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; border: 0;
   }
   #splash {
     position: absolute; top: 0; left: 0; right: 0; bottom: 0;
@@ -35,18 +25,22 @@
   }
   #splash small { font-size: 24px; color: #8c8c8c; }
 
-  /* Log da CASCA na própria tela — sdb dlog/dlogutil não devolvem nada
-     nesta TV (bloqueado mesmo com Developer Mode ligado, comum em TV de
-     varejo), então isto substitui o console por algo visível sem PC
-     nenhum. Faixa de 140px na BASE da tela, fora da área do #flow acima —
-     não uma sobreposição com z-index (ver comentário lá: não funciona
-     nesta combinação de iframe+navegador). */
+  /* Log da CASCA na própria tela — best-effort só, não confiável: um
+     <iframe> com conteúdo carregado desenha por cima de QUALQUER irmão
+     nesta TV, ignorando z-index e até o próprio tamanho declarado em CSS
+     (bug de navegador antigo, bem documentado — não específico desta TV,
+     e não dá pra contornar só com CSS/composição). Não vale mais reservar
+     espaço de tela por causa disto — a saída de verdade agora é o GET pro
+     /api/tizen-debug do próprio servidor (ver "log" mais abaixo), que cai
+     no flow.log de sempre. Isto aqui só ajuda no raro caso de aparecer
+     mesmo (ex: antes do iframe ter conteúdo). */
   #cascaLog {
-    position: fixed; left: 0; right: 0; bottom: 0; height: 140px;
-    overflow: hidden;
-    background: rgba(0,0,0,0.9); color: #7ee787;
-    font: 13px/1.4 monospace; padding: 6px 8px; box-sizing: border-box;
-    border-top: 1px solid #7ee787; white-space: pre-wrap;
+    position: fixed; left: 8px; top: 8px; z-index: 999999;
+    max-width: 40%; max-height: 30vh; overflow: hidden;
+    background: rgba(0,0,0,0.85); color: #7ee787;
+    font: 12px/1.4 monospace; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid #7ee787; white-space: pre-wrap;
+    pointer-events: none;
   }
 
   /* Ligado pelo próprio Flow (dentro do iframe) enquanto o AVPlay está
@@ -75,20 +69,32 @@
 (function () {
   "use strict";
 
-  // Duas saídas ao mesmo tempo: console.log (tentativa via sdb dlog, que
-  // nesta TV não devolveu nada — bloqueado mesmo com Developer Mode ligado,
-  // parece ser comum em TV de varejo) e um log VISÍVEL na própria tela
-  // (#cascaLog), que não depende de PC/sdb/DevTools nenhum. Existe porque o
-  // postMessage entre a casca e o iframe está aparentemente não entregando
-  // NADA (overlay de debug do app mostrou "postMessage recebidos: 0") —
-  // sem isto não tinha como saber se a casca sequer tenta mandar, ou tenta
-  // e falha, ou nem chega a rodar até esse ponto.
+  // ------------------------------------------------------------------
+  // Endereço do Flow no PC. É a ÚNICA coisa que você precisa mexer aqui.
+  // Vale reservar esse IP no DHCP do roteador: se ele mudar, o app abre
+  // no vazio e é preciso reinstalar o .wgt pra corrigir.
   //
-  // Fica logo no topo do arquivo, ANTES de qualquer outra coisa (inclusive
-  // do listener de "error" logo abaixo) de propósito: se alguma linha mais
-  // adiante lançar sem ninguém pegar, o script inteiro para ali — e é
-  // exatamente esse erro que precisa aparecer, então "log" tem que já
-  // existir e funcionar antes de qualquer coisa que possa quebrar.
+  // Fica bem no topo do arquivo (antes até de "log", que precisa dele)
+  // porque "var" só hospeda a DECLARAÇÃO, não o valor — se algo tentasse
+  // ler URL_FLOW antes desta linha rodar, pegaria undefined.
+  // ------------------------------------------------------------------
+  var URL_FLOW = "http://192.168.15.7:3000/";
+
+  // TRÊS saídas ao mesmo tempo pra cada log: console.log (sdb dlog/dlogutil
+  // não devolvem nada nesta TV — bloqueado mesmo com Developer Mode ligado),
+  // um quadro na própria tela (#cascaLog — mas o <iframe> do Flow, uma vez
+  // carregado, desenha por cima de QUALQUER irmão nesta TV, ignorando
+  // z-index e até o próprio tamanho em CSS — bug de navegador antigo, não
+  // dá pra contornar só com CSS, então isto sozinho não é confiável aqui) e
+  // um GET pro próprio servidor do Flow (/api/tizen-debug), que cai direto
+  // no flow.log de sempre — não depende de tela, sdb nem postMessage
+  // nenhum, só da mesma conexão HTTP que já carrega o app.
+  //
+  // "log" fica logo no topo do arquivo, ANTES de qualquer outra coisa
+  // (inclusive do listener de "error" logo abaixo) de propósito: se alguma
+  // linha mais adiante lançar sem ninguém pegar, o script inteiro para ali
+  // — e é exatamente esse erro que precisa aparecer, então "log" tem que
+  // já existir e funcionar antes de qualquer coisa que possa quebrar.
   var logEl = document.getElementById("cascaLog");
   var logLinhas = [];
   function log() {
@@ -102,18 +108,19 @@
     logLinhas.push(texto);
     if (logLinhas.length > 16) logLinhas.shift();
     if (logEl) logEl.textContent = logLinhas.join("\n");
+    try {
+      // new Image() em vez de fetch(): dispara o GET e não liga pra
+      // resposta (nem se um CORS de "Origin: null" bloquear a leitura
+      // dela) — só precisamos que o request CHEGUE no servidor pra cair no
+      // console.log de lá, nunca lemos nada de volta aqui.
+      var img = new Image();
+      img.src = URL_FLOW.replace(/\/$/, "") + "/api/tizen-debug?msg=" + encodeURIComponent(texto);
+    } catch (e) {}
   }
 
   window.addEventListener("error", function (e) {
     log("ERRO NÃO TRATADO:", e.message, "em", e.filename + ":" + e.lineno);
   });
-
-  // ------------------------------------------------------------------
-  // Endereço do Flow no PC. É a ÚNICA coisa que você precisa mexer aqui.
-  // Vale reservar esse IP no DHCP do roteador: se ele mudar, o app abre
-  // no vazio e é preciso reinstalar o .wgt pra corrigir.
-  // ------------------------------------------------------------------
-  var URL_FLOW = "http://192.168.15.7:3000/";
 
   var frame = document.getElementById("flow");
   var splash = document.getElementById("splash");
@@ -179,7 +186,7 @@
   // próprio overlay de debug do app, que a versão da CASCA instalada na TV
   // é de fato a que você acabou de reinstalar (em vez de confiar só em "eu
   // reinstalei"). Muda este texto sempre que mexer neste arquivo.
-  var CASCA_VERSAO = "avplay-6";
+  var CASCA_VERSAO = "avplay-7";
 
   var AVPLAY_CANAL = "flow-tizen-avplay";
   var avplayAberto = false;
