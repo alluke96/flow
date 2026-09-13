@@ -24,6 +24,14 @@
     <name>flow</name>
     <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
     <tizen:profile name="tv-samsung"/>
+    <!-- CSP do widget. Sem declarar nada, a TV aplica a política padrão
+         dela, que pode bloquear script inline — e o app do Flow tem um
+         (o Next embute o estado inicial da página num <script> inline).
+         Bloqueado ali, o JS nunca roda: fica só o HTML pré-renderizado na
+         tela, ou seja, um spinner eterno, sem erro visível em lugar nenhum.
+         Troque o IP pelo do seu PC — é o mesmo que você passou pro
+         `npm run build:tizen`. -->
+    <tizen:content-security-policy>default-src 'self' data: blob: http://192.168.15.7:3000; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://192.168.15.7:3000; media-src 'self' http://192.168.15.7:3000; connect-src 'self' http://192.168.15.7:3000</tizen:content-security-policy>
     <!-- hwkey-event="enable": faz o botão Return físico chegar como keydown
          (keyCode 10009), que o tv-nav já trata (ver src/lib/tv-nav.ts).
 

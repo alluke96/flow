@@ -1301,6 +1301,14 @@ a {
   justify-content: center;
   pointer-events: none;
 }
+/* Centraliza na TELA, não no elemento pai. Serve pros carregamentos que
+   acontecem quando ainda não há layout nenhum em volta (abrir o app, entrar
+   numa tela) — sem isto o spinner cai num container de altura zero e
+   aparece colado no topo, em vez de no meio. Dentro do player a versão
+   absolute basta, porque .player-shell já ocupa a tela inteira. */
+.center-loader.tela-cheia {
+  position: fixed;
+}
 .player-error {
   max-width: 380px;
   text-align: center;

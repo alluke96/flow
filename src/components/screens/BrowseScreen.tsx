@@ -80,7 +80,7 @@ function BrowseInner() {
 
   if (!titles) {
     return (
-      <div className="center-loader" style={{ position: "fixed", inset: 0 }}>
+      <div className="center-loader tela-cheia">
         <div className="spinner" />
       </div>
     );

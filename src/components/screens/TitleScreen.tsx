@@ -64,7 +64,7 @@ function TitleDetailInner({ id }: { id: string }) {
 
   if (loading) {
     return (
-      <div className="center-loader" style={{ position: "fixed", inset: 0 }}>
+      <div className="center-loader tela-cheia">
         <div className="spinner" />
       </div>
     );

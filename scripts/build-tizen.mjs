@@ -155,6 +155,57 @@ writeFileSync(
     .replace(/:HL\[\\"[^\]]*?\.woff2[^\]]*?\]/g, ":HL[]")
 );
 
+// Relator de erros do widget. Dentro da TV não há console alcançável (sem
+// DevTools, e `sdb dlog` não devolve nada nela), então qualquer falha que
+// impeça o app de subir seria invisível — foi exatamente o que aconteceu
+// com o spinner eterno na primeira tentativa.
+//
+// É um ARQUIVO à parte, não um <script> inline, de propósito: se o que
+// estiver derrubando o app for uma CSP do widget bloqueando script inline,
+// um relator inline morreria pelo mesmo motivo e não sobraria pista
+// nenhuma. Como arquivo local, ele passa até na política mais restritiva
+// ('self').
+//
+// Vai como o PRIMEIRO script do <head> pra já estar escutando quando os
+// bundles do app forem avaliados — inclusive pra pegar erro de SINTAXE
+// deles, que dispara window.onerror antes de qualquer código do app rodar.
+const relator = `(function () {
+  var SERVIDOR = ${JSON.stringify(servidor.replace(/\/$/, ""))};
+  function avisar(texto) {
+    try {
+      var img = new Image();
+      img.src = SERVIDOR + "/api/tizen-debug?msg=" + encodeURIComponent(texto);
+    } catch (e) {}
+  }
+  avisar("[widget] abriu | versao=${versao} | ua=" + navigator.userAgent);
+  window.addEventListener("error", function (e) {
+    if (e && e.target && e.target.src) {
+      avisar("[widget] falhou ao carregar: " + e.target.src);
+      return;
+    }
+    avisar("[widget] ERRO: " + (e && e.message) + " @ " + (e && e.filename) + ":" + (e && e.lineno));
+  }, true);
+  window.addEventListener("unhandledrejection", function (e) {
+    avisar("[widget] promessa rejeitada: " + (e && e.reason));
+  });
+  window.addEventListener("securitypolicyviolation", function (e) {
+    avisar("[widget] CSP bloqueou " + e.violatedDirective + " em " + e.blockedURI);
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    setTimeout(function () {
+      // Se o app tivesse subido, o React já teria trocado o conteúdo do
+      // body pela interface de verdade. Ainda ver o spinner aqui significa
+      // que a hidratação não aconteceu.
+      avisar("[widget] 5s depois: hidratou=" + !document.querySelector(".center-loader"));
+    }, 5000);
+  });
+})();`;
+writeFileSync(join(destino, "tizen-debug.js"), relator);
+writeFileSync(
+  indexHtml,
+  readFileSync(indexHtml, "utf8").replace("<head>", '<head><script src="./tizen-debug.js"></script>')
+);
+
 // Peso morto dentro do widget:
 //  - mock/ é o catálogo de demonstração, só serve rodando no PC;
 //  - os .svg são o boilerplate que vem do template do Next;

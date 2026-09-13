@@ -96,7 +96,7 @@ export function ProfileScreen() {
 
   if (!ready) {
     return (
-      <div className="profiles-screen">
+      <div className="center-loader tela-cheia">
         <div className="spinner" />
       </div>
     );

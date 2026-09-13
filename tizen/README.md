@@ -84,6 +84,18 @@ conferir no `<tizen:setting>`:
   linha; em 2021+ já vem desligado. Documentado em
   [Configuring Web Applications](https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html).
 
+**Uma linha que provavelmente precisa ser adicionada**, agora que o app vai
+dentro do widget: a política de segurança (CSP). Sem declarar nada, a TV
+aplica a padrão dela, que pode bloquear script inline — e o Next embute o
+estado inicial da página num `<script>` inline. Bloqueado ali, o JS nunca
+roda e sobra só o HTML pré-renderizado: um spinner eterno, sem erro visível
+em lugar nenhum. Copie do `config.xml` de referência daqui, trocando o IP
+pelo do seu PC (o mesmo que você passa pro `npm run build:tizen`):
+
+```xml
+<tizen:content-security-policy>default-src 'self' data: blob: http://192.168.15.7:3000; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://192.168.15.7:3000; media-src 'self' http://192.168.15.7:3000; connect-src 'self' http://192.168.15.7:3000</tizen:content-security-policy>
+```
+
 Não declare privilege de internet nem `<access>`: o perfil `tv-samsung`
 recusa o projeto e o launch nem começa. O AVPlay também não precisa de
 privilege — desde os modelos de 2015 a Samsung não exige mais isso.
@@ -114,8 +126,12 @@ mesmo com Developer Mode ligado). Duas saídas:
   um quadro de diagnóstico com os eventos de entrada, o estado do player e
   se o AVPlay está mesmo ativo. Agora ele aparece normalmente: sem iframe,
   nada desenha por cima dele.
-- **Log no servidor** — um `GET /api/tizen-debug?msg=...` cai no `flow.log`
-  do PC. Útil pra qualquer coisa que quebre antes da interface aparecer.
+- **Log no servidor** — o build injeta um `tizen-debug.js` que roda ANTES
+  de tudo e reporta pro `flow.log` do PC: user agent da TV, qualquer erro
+  de JavaScript (inclusive erro de sintaxe nos bundles, que mata o app
+  antes de qualquer código nosso rodar), script que falhou ao carregar,
+  violação de CSP, e um balanço 5s depois dizendo se a interface hidratou.
+  É a única janela pra dentro do widget quando o app não sobe.
   ```powershell
   Get-Content C:\flow-secrets\flow.log -Wait -Tail 50 | Select-String tizen-debug
   ```
