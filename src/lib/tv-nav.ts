@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
+import { voltarNav } from "@/lib/nav";
 
 /**
  * Generic D-pad/remote spatial navigation, registered once for the whole
  * app (see ProfileProvider). Purely additive: only listens for keydown and
  * calls .focus() — never touches onClick/touch handlers, so mouse, touch
  * and existing keyboard (Tab, Enter) behavior is unchanged for web/mobile.
- * :focus-visible (used everywhere for the focus ring) already only
- * triggers for keyboard/programmatic focus, not mouse/touch clicks.
+ * The focus ring (see globals.css) already only shows up for
+ * keyboard/programmatic focus, not mouse/touch clicks.
  *
  * Finds the nearest focusable element in the pressed direction by simple
  * geometry (bounding-box centers) instead of assuming any particular page
@@ -18,7 +19,7 @@ import { useEffect } from "react";
  * Left/Right and the back key are skipped entirely while the video player
  * is open: VideoPlayer already has its own, more specific handling for them
  * (arrows = seek ±10s or adjust whatever control is focused, Escape/back =
- * exit) that would conflict with focus-jumping or global history.back().
+ * exit) that would conflict with focus-jumping or the global back.
  * Up/Down are NOT claimed by VideoPlayer at all, so they're left enabled
  * even inside the player — that's the only way to reach the progress bar,
  * volume, fullscreen etc. with a D-pad in the first place (there's no
@@ -26,9 +27,11 @@ import { useEffect } from "react";
  * progress bar, Up goes back, same geometry-based logic as everywhere else.
  *
  * TIZEN_BACK_KEYCODE is the physical "Return" button on Samsung remotes
- * (not the same as Escape) — falls back to browser history.back(), which
- * is the natural "go back" for browse/title/profile screens. The player
- * has its own back handling for the same physical button (see
+ * (not the same as Escape) — routed through voltarNav() (see lib/nav), the
+ * only "go back" that works in BOTH contexts: browser history on the web,
+ * the screen stack inside the Tizen widget (where there is no history to
+ * go back to at all, since the whole app is a single file:// page). The
+ * player has its own back handling for the same physical button (see
  * VideoPlayer's onKeyDown), so this is skipped there too.
  */
 const TIZEN_BACK_KEYCODE = 10009;
@@ -125,7 +128,7 @@ export function useTVNav() {
       if (e.keyCode === TIZEN_BACK_KEYCODE) {
         if (inPlayer) return; // VideoPlayer's own onKeyDown handles this.
         e.preventDefault();
-        window.history.back();
+        voltarNav();
         return;
       }
 

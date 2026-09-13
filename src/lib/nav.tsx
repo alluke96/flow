@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -19,8 +19,9 @@ import { useRouter } from "next/navigation";
  *    "estado" (ver NavEstadoProvider).
  *
  * As telas (ver src/components/screens) não sabem em qual dos dois estão:
- * chamam `ir()`/`voltar()` e pronto. É isso que permite o mesmo código de
- * UI servir os dois sem `if (tizen)` espalhado.
+ * chamam `ir()` e pronto. É isso que permite o mesmo código de UI servir os
+ * dois sem `if (tizen)` espalhado. O "voltar" global (botão Return do
+ * controle) é `voltarNav()`, logo abaixo.
  */
 
 export type Tela =
@@ -57,6 +58,46 @@ interface NavContexto {
    * nenhum — a troca é só estado React —, então vira no-op.
    */
   prefetch(tela: Tela): void;
+}
+
+/**
+ * "Voltar" global — o que o botão Return do controle remoto chama (ver
+ * src/lib/tv-nav.ts).
+ *
+ * Por que um registro de módulo e não mais um campo do contexto: quem
+ * escuta a tecla é o ProfileProvider, que fica ACIMA do NavEstadoProvider
+ * na árvore (ver src/app/tv/page.tsx) — de lá, um useNav() alcançaria
+ * apenas o provider de rota do layout, e no widget `router.back()` não tem
+ * pra onde ir (é `file://`, uma página só, sem histórico): era exatamente
+ * isso que fazia o Return não voltar tela nenhuma na TV.
+ *
+ * Só o modo estado se registra. Sem registro — ou seja, na web — o
+ * comportamento certo continua sendo o histórico do navegador.
+ */
+let voltarRegistrado: (() => void) | null = null;
+
+export function voltarNav(): void {
+  if (voltarRegistrado) {
+    voltarRegistrado();
+    return;
+  }
+  window.history.back();
+}
+
+/**
+ * Return na tela raiz fecha o app: é o que a TV faz em qualquer app dela, e
+ * o que a Samsung exige pra certificação. Fora da TV não existe `tizen`
+ * nenhum e isso não faz nada.
+ */
+function sairDoApp(): void {
+  const tz = (window as unknown as {
+    tizen?: { application?: { getCurrentApplication(): { exit(): void } } };
+  }).tizen;
+  try {
+    tz?.application?.getCurrentApplication().exit();
+  } catch {
+    // sem widget por baixo não há o que fechar — seguir na tela mesmo
+  }
 }
 
 const Ctx = createContext<NavContexto | null>(null);
@@ -109,10 +150,34 @@ export function NavEstadoProvider({
 
   const ir = useCallback<NavContexto["ir"]>((tela, opts) => {
     setTelaAtual((atual) => {
-      if (!opts?.substituir) pilhaRef.current.push(atual);
+      if (opts?.substituir) return tela;
+      // Ir pra tela de onde acabamos de vir é VOLTAR, não avançar — e a
+      // maior parte do app navega assim: sair do player cai no detalhe do
+      // título, o botão de voltar do detalhe cai no browse. Empilhando
+      // esses, o botão Return do controle ficaria pingando entre as duas
+      // telas pra sempre, sem nunca chegar no começo.
+      const anterior = pilhaRef.current[pilhaRef.current.length - 1];
+      if (anterior && hrefDeTela(anterior) === hrefDeTela(tela)) {
+        pilhaRef.current.pop();
+        return tela;
+      }
+      pilhaRef.current.push(atual);
       return tela;
     });
   }, []);
+
+  const voltar = useCallback(() => {
+    const anterior = pilhaRef.current.pop();
+    if (anterior) setTelaAtual(anterior);
+    else sairDoApp();
+  }, []);
+
+  useEffect(() => {
+    voltarRegistrado = voltar;
+    return () => {
+      if (voltarRegistrado === voltar) voltarRegistrado = null;
+    };
+  }, [voltar]);
 
   const valor = useMemo<NavContexto>(
     () => ({ ir, href: () => "#", telaAtual, prefetch: () => {} }),

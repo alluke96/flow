@@ -168,6 +168,19 @@ eterno, sem erro visível) e causas diferentes:
   na primeira linha de CADA chunk; `queueMicrotask` é 71 e o React usa.
   Browserslist não cobre isso — ele baixa sintaxe, não define globais.
   Resolvido no `tizen-boot.js`, que roda antes de qualquer chunk.
+- **CSS**: o navegador descarta calado a declaração que não entende — e,
+  pior, a regra `@` inteira. Deu o app todo colado na borda da tela
+  (`clamp()`/`min()`/`max()`, Chrome 79), perfis sem espaçamento (`gap` em
+  flexbox é Chrome 84), foco invisível (`:focus-visible` é Chrome 86) e
+  `<button>` cinza do sistema na lista de episódios — este último porque o
+  Tailwind põe o reset dele dentro de `@layer` (Chrome 99), que some
+  inteiro. Tudo isso está resolvido num bloco `@supports` só, no fim de
+  `src/app/globals.css`, com o porquê de cada item.
+
+  Fica o aviso pra quem for mexer lá: **não adianta escrever o valor antigo
+  numa linha e o moderno na seguinte**. Parece o jeito certo (e é, em CSS
+  escrito à mão), mas o minificador do build apaga a primeira por enxergar
+  uma declaração morta, e o que chega na TV é só a que ela não entende.
 
 Se um dia o app voltar a ficar num carregamento eterno depois de atualizar
 dependência, o primeiro lugar pra olhar é o `flow.log`: o erro vem de lá

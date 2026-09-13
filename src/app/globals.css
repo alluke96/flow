@@ -1,5 +1,56 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Compatibilidade com o navegador da TV (Chromium 69 — ver tizen/README.md)
+   ==========================================================================
+   Desde que o app passou a rodar DENTRO do widget Tizen, este arquivo é lido
+   por um navegador de 2018. O que ele não entende está reunido em UM lugar:
+   o bloco @supports no fim do arquivo. Tentar resolver na cascata (o valor
+   antigo numa linha, o moderno na linha seguinte) não funciona aqui — o
+   minificador do build enxerga a primeira declaração como morta e apaga,
+   e o que chega na TV é só a que ela não entende.
+
+   O reset abaixo entra no mesmo balaio: o Tailwind põe o preflight dele
+   dentro de @layer (Chrome 99) e o Chromium 69 pula regra @ que não
+   conhece — ou seja, na TV o app rodava SEM reset nenhum, com <button>
+   pintado de cinza pelo sistema (era o "fundo branco" da lista de
+   episódios) e margens/paddings padrão do navegador em tudo. Repetir aqui,
+   fora de @layer, é inofensivo na web: são exatamente as mesmas
+   declarações que o preflight já aplica. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background-color: transparent;
+  border-radius: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
 :root {
   --bg: #0a0a0b;
   --bg-elev: #141416;
@@ -13,10 +64,6 @@
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI",
     Roboto, sans-serif;
   color-scheme: dark;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,
@@ -71,6 +118,21 @@ a {
   outline: 3px solid var(--accent-2);
   outline-offset: 3px;
   border-radius: 8px;
+}
+/* O mesmo anel, agora também pro :focus simples — :focus-visible é Chrome
+   86 e o navegador da TV descarta a regra acima inteira, deixando o usuário
+   sem NENHUMA pista visual de onde o foco está (e no controle remoto o foco
+   é a única forma de navegar). O par abaixo resolve sem mudar nada na web:
+   navegador moderno aplica o anel no :focus e o tira de novo em seguida
+   quando o foco NÃO é de teclado; o antigo descarta essa segunda regra (não
+   entende :focus-visible nem dentro do :not) e fica com o anel sempre. */
+:focus {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* ---------- Tela de perfis ---------- */
@@ -232,7 +294,10 @@ a {
 }
 .profile-edit-badge {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -256,7 +321,10 @@ a {
 /* ---------- Modal ---------- */
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(6px);
   display: flex;
@@ -439,7 +507,10 @@ a {
 }
 .hero-bg {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background-size: cover;
   background-position: center;
 }
@@ -452,7 +523,10 @@ a {
 }
 .hero-fade {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: linear-gradient(
     to top,
     var(--bg) 2%,
@@ -645,13 +719,19 @@ a {
 }
 .detail-banner-bg {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background-size: cover;
   background-position: center;
 }
 .detail-banner-fade {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: linear-gradient(to top, var(--bg), rgba(10, 10, 11, 0.2) 60%);
 }
 .back-btn {
@@ -825,7 +905,10 @@ a {
 .player-shell {
   background: #000;
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 200;
 }
 /* Em tela cheia de verdade (Fullscreen API — não o fullscreen nativo do
@@ -860,7 +943,10 @@ a {
 }
 .player-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   opacity: 1;
   transition: opacity 0.25s;
   background: linear-gradient(
@@ -949,7 +1035,10 @@ a {
    nem no botão de voltar, que ficam por baixo dessa caixa cheia. */
 .player-center {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1295,7 +1384,10 @@ a {
 }
 .center-loader {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1339,7 +1431,10 @@ a {
    animação mesmo tocando repetido do mesmo lado. */
 .seek-flash {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   width: 50%;
   display: flex;
   align-items: center;
@@ -1442,5 +1537,175 @@ a {
   :focus-visible {
     outline-width: 4px;
     outline-offset: 5px;
+  }
+}
+
+/* ==========================================================================
+   Só pro navegador da TV (Chromium 69) — ver o cabeçalho deste arquivo
+   ==========================================================================
+   O que não dá pra resolver com cascata fica aqui. A sonda é o clamp()
+   (Chrome 79): não existe consulta @supports pra "gap de flexbox" — `gap`
+   responde que sim porque funciona em GRID desde o Chrome 66, e o suporte
+   em FLEX só veio no 84. Como todo navegador sem clamp() também está sem
+   gap de flex, a sonda do clamp cobre exatamente o caso que interessa.
+   Navegador atual nem entra aqui: pra ele a condição é falsa. */
+@supports not (width: clamp(1px, 1vw, 2px)) {
+  /* Espaçamento: `gap` em flex vira margem nos filhos. Em container que
+     quebra linha (flex-wrap) a margem vai nos quatro lados; nos demais, só
+     entre um filho e o próximo. */
+  .profiles-grid > * {
+    margin: 14px;
+  }
+  .profile-card > * + * {
+    margin-top: 12px;
+  }
+  .modal-actions > * + * {
+    margin-left: 10px;
+  }
+  .nav-right > * + * {
+    margin-left: 18px;
+  }
+  .hero-meta > * + * {
+    margin-left: 10px;
+  }
+  .hero-actions > * + * {
+    margin-left: 12px;
+  }
+  .btn-hero > * + * {
+    margin-left: 8px;
+  }
+  .row-track > * + * {
+    margin-left: 12px;
+  }
+  .detail-meta > * {
+    margin: 0 10px 10px 0;
+  }
+  .detail-actions > * {
+    margin: 0 12px 12px 0;
+  }
+  .season-picker > * {
+    margin: 0 8px 8px 0;
+  }
+  .episode > * + * {
+    margin-left: 14px;
+  }
+  .player-top > * + * {
+    margin-left: 16px;
+  }
+  .player-center > * + * {
+    margin-left: 48px;
+  }
+  .progress-row > * + * {
+    margin-left: 12px;
+  }
+  .player-controls-row > * + * {
+    margin-left: 18px;
+  }
+  .next-ep-btn > * + * {
+    margin-left: 6px;
+  }
+  .next-up-toast > * + * {
+    margin-left: 14px;
+  }
+  .volume-control > * + * {
+    margin-left: 8px;
+  }
+  .seek-flash-badge > * + * {
+    margin-top: 8px;
+  }
+
+  /* As classes utilitárias do Tailwind também vivem dentro de @layer, ou
+     seja, somem junto com o preflight: html/body ficam sem as duas únicas
+     que o app usa (h-full/min-h-full, ver src/app/layout.tsx). */
+  html {
+    height: 100%;
+  }
+  body {
+    min-height: 100%;
+  }
+
+  /* Medidas: clamp()/min()/max() são Chrome 79 e a declaração inteira cai
+     (era o texto colado na borda da tela). Os valores repetidos aqui são
+     exatamente o que a fórmula daria numa tela de 1920px, que é a da TV. */
+  .profiles-screen {
+    min-height: 100vh;
+  }
+  .profiles-refresh-btn {
+    top: 20px;
+    right: 32px;
+  }
+  .profiles-title {
+    font-size: 40px;
+  }
+  .topnav {
+    padding: 18px 48px;
+  }
+  .hero {
+    height: 720px;
+  }
+  .hero-content {
+    padding: 0 48px 48px;
+  }
+  .hero-title {
+    font-size: 64px;
+  }
+  .row-title,
+  .row-empty {
+    padding: 0 48px;
+  }
+  .row-track {
+    padding: 4px 48px 14px;
+  }
+  .search-empty {
+    padding: 80px 48px;
+  }
+  .detail-banner {
+    height: 520px;
+  }
+  .back-btn {
+    top: 20px;
+    left: 48px;
+  }
+  .detail-body {
+    padding: 0 48px 60px;
+  }
+  .detail-title {
+    font-size: 44px;
+  }
+  .player-top {
+    padding: 20px 40px 32px;
+  }
+  .player-bottom {
+    padding: 10px 40px 26px;
+  }
+  .next-up-toast {
+    right: 40px;
+  }
+
+  /* Sem o preflight, o desenho nativo do <button>/<select> do sistema volta
+     por cima do nosso (fundo cinza, borda em relevo). Zerar `appearance`
+     resolve; fica aqui, e não no reset lá de cima, porque na web o
+     preflight faz o contrário de propósito (`appearance: button`). */
+  button,
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  /* Anel de foco mais forte: é uma tela vista de longe, e sem
+     :focus-visible cada componente perde o realce próprio dele (o nosso
+     está todo escrito em :focus-visible) — sobra este, então ele precisa
+     dar conta sozinho. */
+  :focus {
+    outline-width: 4px;
+    outline-offset: 5px;
+    box-shadow: 0 0 0 9px rgba(10, 132, 255, 0.22);
+  }
+  /* Os dois campos de texto tiram o anel de propósito e marcam o foco só
+     pela cor da borda — de longe, no sofá, isso não se vê. */
+  .modal input[type="text"]:focus,
+  .search-input:focus {
+    outline: 3px solid var(--accent-2);
+    outline-offset: 2px;
   }
 }
