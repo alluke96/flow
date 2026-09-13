@@ -49,3 +49,6 @@ next-env.d.ts
 .next-tizen/
 tizen/app/
 .tizen-build-guardado/
+
+# runner do GitHub Actions instalado dentro da pasta do projeto (self-host)
+actions-runner/

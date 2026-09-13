@@ -30,5 +30,20 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // O runner do GitHub Actions se instala DENTRO da pasta do projeto no
+    // self-host (C:\flow\actions-runner) e traz o código-fonte em
+    // TypeScript das actions que baixa — actions/checkout, por exemplo, com
+    // testes e dependências próprias que não estão instaladas aqui. Sem
+    // esta exclusão, `next build` rodado à mão na raiz tenta type-checkar
+    // tudo isso e falha com centenas de erros que não são do Flow. (No
+    // deploy automático isso não acontece porque lá o checkout fica numa
+    // subpasta própria do runner, sem o runner dentro.)
+    "actions-runner",
+    // Saída de build do app de TV — código gerado, ver scripts/build-tizen.mjs
+    ".next-tizen",
+    "tizen/app",
+    "out"
+  ]
 }
