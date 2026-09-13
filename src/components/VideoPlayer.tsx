@@ -1,32 +1,31 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type PointerEvent,
-  type TouchEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useProfiles } from "@/context/profile-context";
 import { streamUrl } from "@/lib/api-client";
-import { fmtTime } from "@/lib/format";
 import { useTizenPlayer } from "@/lib/tizen-player-bridge";
-import {
-  Back10Icon,
-  BackArrowIcon,
-  FullscreenEnterIcon,
-  FullscreenExitIcon,
-  Forward10Icon,
-  NextEpisodeIcon,
-  PauseIcon,
-  PlayIcon,
-  ReplayIcon,
-  VolumeHighIcon,
-  VolumeLowIcon,
-  VolumeMuteIcon,
-} from "./player-icons";
+import { FullscreenEnterIcon, FullscreenExitIcon, NextEpisodeIcon } from "./player-icons";
+import { NextUpToast } from "./player/NextUpToast";
+import { PlaybackErrorPanel } from "./player/PlaybackErrorPanel";
+import { PlayerCenterControls } from "./player/PlayerCenterControls";
+import { PlayerTopBar } from "./player/PlayerTopBar";
+import { ProgressBar } from "./player/ProgressBar";
+import { RateSelect } from "./player/RateSelect";
+import { SeekFlashBadge } from "./player/SeekFlashBadge";
+import { VolumeControl } from "./player/VolumeControl";
+import { useDoubleTapSeek } from "./player/useDoubleTapSeek";
+import { useExitPlayer } from "./player/useExitPlayer";
+import { useFullscreen } from "./player/useFullscreen";
+import { useKeyboardShortcuts } from "./player/useKeyboardShortcuts";
+import { useNextEpisodeCountdown } from "./player/useNextEpisodeCountdown";
+import { useOverlayVisibility } from "./player/useOverlayVisibility";
+import { usePlaybackActions } from "./player/usePlaybackActions";
+import { usePlaybackTime } from "./player/usePlaybackTime";
+import { useProgressBarDrag } from "./player/useProgressBarDrag";
+import { useProgressPersistence } from "./player/useProgressPersistence";
+import { useResumePlayback } from "./player/useResumePlayback";
+import { useSeekFlash } from "./player/useSeekFlash";
+import type { PlaybackErrorDetail } from "./player/types";
 
 interface VideoPlayerProps {
   titleId: string;
@@ -37,31 +36,27 @@ interface VideoPlayerProps {
   onNextEpisode?: () => void;
 }
 
-/** APIs não-padrão do WebKit/iOS Safari pra fullscreen do <video>. */
-interface WebkitVideoElement extends HTMLVideoElement {
-  webkitEnterFullscreen?: () => void;
-  webkitExitFullscreen?: () => void;
-  webkitDisplayingFullscreen?: boolean;
-}
-
-const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-const OVERLAY_HIDE_MS = 3200;
-const DOUBLE_TAP_MS = 320;
-// Teto pra esperar o "seeked" do seek de retomada antes de dar play assim
-// mesmo (ver handleLoadedMetadata) — nunca deixa o player travado esperando
-// um evento que pode não vir. 3000ms (era 1500) porque agora cabe uma
-// SEGUNDA tentativa aqui dentro (ver "pousouLonge"/tentouDeNovo) se a
-// primeira busca cair no lugar errado — cada tentativa pode precisar de um
-// round-trip de rede novo pro Drive (~600-1000ms, pelos logs de streaming).
-const RESUME_SEEK_TIMEOUT_MS = 3000;
-const NEXT_EPISODE_COUNTDOWN_S = 5;
-
 /**
  * Player customizado: controles próprios, gestos de toque (tap = play/pause,
  * duplo tap nas metades esquerda/direita = -10s/+10s), teclado (espaço,
  * setas, Esc) e navegação por foco grande o bastante pro "10-foot UI" de
  * Smart TV (ver globals.css). O <video> aponta pra /api/stream/:id, que
  * suporta Range Requests de verdade — o próprio elemento cuida do seek.
+ *
+ * A lógica em si mora em hooks dedicados sob ./player (um por
+ * responsabilidade: overlay, tempo/seek, feedback do duplo-toque, arrasto
+ * da barra, retomada, persistência, saída, fullscreen, contagem do próximo
+ * episódio, atalhos de teclado) — este componente só liga tudo e renderiza.
+ *
+ * EXCEÇÃO: dentro da casca Tizen (ver tizen-player-bridge.ts), o vídeo em
+ * si não usa <video> nenhum — usa o player NATIVO da TV (AVPlay), porque o
+ * <video> HTML5 desta TV tem um bug confirmado de busca (seek) que nunca
+ * chega a pedir bytes ainda não baixados. Os hooks acima continuam
+ * existindo nesse modo (a maioria simplesmente não faz nada, já que
+ * videoRef.current fica sempre null) — só as funções que precisam de fato
+ * mexer no vídeo (play/pause/seek/volume/velocidade/salvar progresso/sair)
+ * ganham uma versão "nativa" que fala com a casca por postMessage em vez
+ * do elemento. Ver as variáveis `nativeMode`/`tz` abaixo.
  */
 export function VideoPlayer({
   titleId,
@@ -74,11 +69,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const nativeAreaRef = useRef<HTMLDivElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTapRef = useRef<{ t: number } | null>(null);
-  const draggingRef = useRef(false);
-  const dragPctRef = useRef<number | null>(null);
+  const { saveProgress, syncProfiles } = useProfiles();
 
   // Player nativo da TV (AVPlay), só existe dentro da casca Tizen — ver
   // tizen-player-bridge.ts pro porquê. `active` fica null até o handshake
@@ -86,285 +77,221 @@ export function VideoPlayer({
   const tz = useTizenPlayer();
   const nativeMode = tz.active === true;
   // Espelho síncrono de tz.state pra ler sem depender do ciclo de render
-  // (mesmo motivo de doSaveProgress ler v.currentTime direto em vez de
-  // estado do React — ver o comentário lá).
+  // (mesmo motivo de doSaveProgress, em useProgressPersistence, ler
+  // v.currentTime direto em vez de estado do React) — também é o que
+  // useProgressPersistence usa como `nativeRef` (as formas coincidem:
+  // currentTime/duration/seeking/paused).
   const tzStateRef = useRef(tz.state);
   useEffect(() => {
     tzStateRef.current = tz.state;
   }, [tz.state]);
 
-  const { saveProgress, syncProfiles } = useProfiles();
-
   const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [bufferedEnd, setBufferedEnd] = useState(0);
-  // Tenta iniciar com som (ver handleLoadedMetadata) — só cai pra mudo se
-  // o navegador bloquear autoplay com som, daí sim precisa começar mudo pra
-  // garantir que ao menos toque sozinho.
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [rate, setRate] = useState(1);
-  const [overlayHidden, setOverlayHidden] = useState(false);
   const [ended, setEnded] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [playbackError, setPlaybackError] = useState(false);
-  // Detalhe real do MediaError (ver onError) — sem isso, QUALQUER falha
-  // (rede/CORS bloqueando o request, arquivo corrompido, codec não suportado
-  // de verdade...) mostrava a mesma mensagem genérica de ".mkv não
-  // compatível", mesmo quando a causa real era outra inteiramente (ex: uma
-  // resposta 403/500 no lugar dos bytes do vídeo — o <video> não sabe
-  // diferenciar isso de um arquivo ilegível, e a mensagem genérica escondia
-  // qual dos dois realmente aconteceu). Mostrar o código/mensagem de
-  // verdade permite saber a causa real da próxima vez, em vez de adivinhar.
-  const [playbackErrorDetail, setPlaybackErrorDetail] = useState<{
-    code: number | undefined;
-    message: string;
-  } | null>(null);
   // depois do primeiro play, um "waiting" (rebuffer no meio de um seek, por
   // exemplo) não deve mais esconder os botões atrás de um spinner — só o
   // carregamento inicial faz isso
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [preview, setPreview] = useState<{ pct: number; time: number } | null>(null);
-  // null = sem contagem rolando (ainda não acabou, ou usuário cancelou).
-  // Enquanto tem próximo episódio, o fim do vídeo arma essa contagem em
-  // vez de já disparar onNextEpisode — dá pra cancelar e ficar aqui.
-  const [nextCountdown, setNextCountdown] = useState<number | null>(null);
-  // Feedback visual do duplo-toque pra buscar ±10s (estilo YouTube) — sem
-  // isso, o seek era seco demais: nada na tela indicava que o duplo-toque
-  // tinha sido reconhecido, só o tempo pulando. `id` incrementa a cada
-  // duplo-toque, mesmo repetido do mesmo lado — é a troca de `key` no JSX
-  // (ver render) que reinicia a animação CSS a cada vez.
-  const [seekFlash, setSeekFlash] = useState<{ dir: "back" | "fwd"; id: number } | null>(null);
-  const seekFlashIdRef = useRef(0);
+  const [loading, setLoading] = useState(true);
+  const [playbackError, setPlaybackError] = useState(false);
+  const [playbackErrorDetail, setPlaybackErrorDetail] = useState<PlaybackErrorDetail | null>(null);
+
+  const { overlayHidden, showOverlay } = useOverlayVisibility(videoRef);
+  const {
+    currentTime,
+    setCurrentTime,
+    duration,
+    setDuration,
+    bufferedEnd,
+    setBufferedEnd,
+    onProgress,
+    seekBy: seekByVideo,
+    seekToPct: seekToPctVideo,
+  } = usePlaybackTime(videoRef, showOverlay);
+  const {
+    muted,
+    setMuted,
+    volume,
+    setVolume,
+    rate,
+    setRate,
+    togglePlay: togglePlayVideo,
+    toggleMute: toggleMuteVideo,
+    handleVolumeChange: handleVolumeChangeVideo,
+    handleRateChange: handleRateChangeVideo,
+  } = usePlaybackActions(videoRef);
+  const { seekFlash, triggerSeekFlash } = useSeekFlash();
+
+  // Busca (±10s, duplo-toque, setas, barra de progresso) e ações de
+  // play/pause/mudo/volume/velocidade: em modo nativo, comandam o AVPlay da
+  // casca por postMessage em vez do <video> (que nem existe nesse modo).
+  // Ficam definidas aqui, e não dentro dos hooks de vídeo, porque são as
+  // únicas funções que todo o resto do componente (JSX, useDoubleTapSeek,
+  // useProgressBarDrag, useKeyboardShortcuts) precisa chamar sem saber qual
+  // motor está tocando por trás.
+  const seekBy = useCallback(
+    (delta: number) => {
+      if (nativeMode) {
+        const max = tzStateRef.current.duration || Infinity;
+        const next = Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max);
+        tz.api.seekTo(next);
+        setCurrentTime(next);
+        showOverlay();
+        return;
+      }
+      seekByVideo(delta);
+    },
+    [nativeMode, tz.api, setCurrentTime, showOverlay, seekByVideo]
+  );
+
+  const seekToPct = useCallback(
+    (pct: number) => {
+      if (nativeMode) {
+        const dur = tzStateRef.current.duration;
+        if (!dur) return;
+        const next = Math.min(Math.max(0, pct), 1) * dur;
+        tz.api.seekTo(next);
+        setCurrentTime(next);
+        return;
+      }
+      seekToPctVideo(pct);
+    },
+    [nativeMode, tz.api, setCurrentTime, seekToPctVideo]
+  );
+
+  const togglePlay = useCallback(() => {
+    if (nativeMode) {
+      const estavaPausado = tzStateRef.current.paused;
+      if (estavaPausado) {
+        tz.api.play();
+        setPlaying(true);
+        showOverlay();
+      } else {
+        tz.api.pause();
+        setPlaying(false);
+      }
+      return;
+    }
+    togglePlayVideo();
+  }, [nativeMode, tz.api, showOverlay, togglePlayVideo]);
+
+  const toggleMute = useCallback(() => {
+    // AVPlay não expõe volume por instância (é sempre o volume do sistema,
+    // controlado pelo controle remoto físico) — em modo nativo o botão só
+    // atualiza o desenho na tela, sem efeito real no áudio.
+    if (nativeMode) {
+      setMuted((m) => !m);
+      return;
+    }
+    toggleMuteVideo();
+  }, [nativeMode, setMuted, toggleMuteVideo]);
+
+  const handleVolumeChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      if (nativeMode) {
+        // Ver toggleMute: fica só visual em modo nativo.
+        const value = parseFloat(e.target.value);
+        setVolume(value);
+        setMuted(value === 0);
+        return;
+      }
+      handleVolumeChangeVideo(e);
+    },
+    [nativeMode, setVolume, setMuted, handleVolumeChangeVideo]
+  );
+
+  const handleRateChange = useCallback(
+    (e: ChangeEvent<HTMLSelectElement>) => {
+      if (nativeMode) {
+        const next = parseFloat(e.target.value);
+        tz.api.setSpeed(next);
+        setRate(next);
+        return;
+      }
+      handleRateChangeVideo(e);
+    },
+    [nativeMode, tz.api, setRate, handleRateChangeVideo]
+  );
+
+  const { handleVideoAreaClick, handleTouchEnd } = useDoubleTapSeek({ seekBy, triggerSeekFlash, showOverlay });
+  const {
+    progressRef,
+    dragging,
+    preview,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handlePointerLeave,
+    handleKeyDown: handleProgressKeyDown,
+  } = useProgressBarDrag({ duration, seekToPct, showOverlay });
+  const { isFullscreen, toggleFullscreen } = useFullscreen(videoRef, shellRef);
+  const { nextCountdown, startCountdown, cancelCountdown } = useNextEpisodeCountdown(onNextEpisode);
+
+  const doSaveProgress = useProgressPersistence({
+    videoRef,
+    nativeRef: nativeMode ? tzStateRef : undefined,
+    titleId,
+    episodeId,
+    saveProgress,
+  });
+  const { exitingRef, handleExit } = useExitPlayer({
+    videoRef,
+    doSaveProgress,
+    onExit,
+    syncProfiles,
+    releaseMedia: nativeMode ? () => tz.api.close() : undefined,
+  });
+  const resumePlayback = useResumePlayback(videoRef, initialTime, setMuted);
+
+  useKeyboardShortcuts({ showOverlay, togglePlay, seekBy, handleExit });
 
   const src = streamUrl(titleId, episodeId);
   // Capturados em ref pro efeito de abertura do AVPlay (abaixo) não precisar
   // reabrir o vídeo a cada re-render — só lê o valor mais recente na hora
-  // que dispara, mesma lógica de outras refs "espelho" já usadas no arquivo.
+  // que dispara.
   const srcRef = useRef(src);
-  srcRef.current = src;
   const initialTimeRef = useRef(initialTime);
-  initialTimeRef.current = initialTime;
-
-  const scheduleHide = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      const v = videoRef.current;
-      if (v && !v.paused) setOverlayHidden(true);
-    }, OVERLAY_HIDE_MS);
-  }, []);
-
-  const showOverlay = useCallback(() => {
-    setOverlayHidden(false);
-    scheduleHide();
-  }, [scheduleHide]);
-
   useEffect(() => {
-    // dispara o timer de auto-hide assim que o player monta
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    showOverlay();
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, [showOverlay]);
-
-  // saveProgress mexe num contexto ancestral (perfis) — chamar isso de forma
-  // síncrona bem no meio de uma transição de rota em andamento (ex: acabou
-  // de clicar em "voltar") pode fazer o React/Next.js abortar essa transição
-  // silenciosamente (já vimos essa exata causa raiz umas 3 vezes nesta base
-  // de código: no efeito de cleanup do desmonte, no onPause, e agora aqui).
-  // Em vez de lembrar de adiar em cada lugar que chama doSaveProgress (é
-  // assim que a gente foi mordido de novo — o intervalo de 5s abaixo nunca
-  // tinha esse adiamento), o adiamento agora mora AQUI, uma vez só, pra
-  // proteger todo mundo que chamar essa função. Os valores em si são lidos
-  // na hora (síncrono, com o <video> ainda garantidamente válido) — só a
-  // chamada que toca o contexto ancestral é que espera o próximo tick.
-  const doSaveProgress = useCallback(() => {
-    if (nativeMode) {
-      // Mesmo cuidado do ramo <video> abaixo, só que lendo do espelho do
-      // AVPlay: `seeking` true = busca em andamento, currentTime ainda não
-      // reflete o destino.
-      const s = tzStateRef.current;
-      if (!s.duration || s.seeking) return;
-      const snapshot = { t: s.currentTime, d: s.duration };
-      setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
-      return;
-    }
-    const v = videoRef.current;
-    if (!v || !v.duration) return;
-    // v.seeking true = uma busca ainda em andamento (ex: o seek de
-    // retomada, logo ao entrar — ver handleLoadedMetadata). currentTime
-    // pode não refletir o destino ainda nesse meio-tempo, especialmente
-    // numa rede mais lenta (uma TV na Wi-Fi contra o self-host, por
-    // exemplo): salvar essa amostra podia registrar um valor perto de 0
-    // mesmo tendo acabado de retomar de bem mais adiante. Pra uma série,
-    // isso é destrutivo — perto de 0 faz saveProgress DESCARTAR a entrada
-    // de "continuar assistindo" (ver quaseNoInicio em profile-context.tsx),
-    // e o próximo episódio a resolver, sem progresso nenhum pra achar, virava
-    // o primeiro da série. Esperar a busca assentar evita salvar essa
-    // amostra ruim; o intervalo de 5s tenta de novo em seguida.
-    if (v.seeking) return;
-    const snapshot = { t: v.currentTime, d: v.duration };
-    setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
-  }, [saveProgress, titleId, episodeId, nativeMode]);
-
-  /**
-   * Sair do player. O ponto aqui é a navegação acontecer NA HORA, e tudo
-   * mais ficar pra depois.
-   *
-   * A ORDEM aqui é o ponto todo, e já erramos ela: soltar a mídia antes de
-   * navegar faz o vídeo pausar e ficar preto na hora, mas `pause()` dispara
-   * "pause", que mexe no contexto de perfis — exatamente o tipo de escrita
-   * que faz o React/Next abandonar uma navegação em andamento. Resultado:
-   * pausava, escurecia e NÃO voltava. Agora navega PRIMEIRO e só depois
-   * (no próximo tick, já fora do caminho da transição) solta a mídia e
-   * salva o progresso. Enquanto sai, os handlers do <video> ficam mudos
-   * (exitingRef) pra nenhum evento de desmontagem mexer em estado.
-   */
-  const exitingRef = useRef(false);
-  const handleExit = useCallback(() => {
-    if (exitingRef.current) return;
-    exitingRef.current = true;
-
-    // Lê o progresso agora (síncrono, elemento ainda válido). O envio em si
-    // já é adiado por dentro de doSaveProgress.
-    doSaveProgress();
-
-    // Navega imediatamente — nada pode vir antes disto.
-    onExit();
-
-    // Só então solta a mídia: aborta o download em andamento e libera as
-    // conexões que o streaming segurava. Fica pro próximo tick pra não
-    // atravessar o commit da navegação.
-    setTimeout(() => {
-      if (nativeMode) {
-        tz.api.close();
-      } else {
-        const v = videoRef.current;
-        if (v) {
-          try {
-            v.pause();
-            v.removeAttribute("src");
-            v.load();
-          } catch {
-            // se o navegador reclamar, tudo bem: já saímos, que é o que importa
-          }
-        }
-      }
-
-      // Agora sim, com a navegação já feita e a mídia solta, o progresso
-      // que acabou de ser salvo localmente pode ir pro servidor (pros
-      // outros aparelhos enxergarem). É manda-e-esquece via sendBeacon:
-      // não segura conexão nem volta pra mexer em estado. Este timeout roda
-      // depois do agendado por doSaveProgress, então o que sai daqui já
-      // inclui o minuto em que o vídeo parou.
-      syncProfiles();
-    }, 0);
-  }, [doSaveProgress, onExit, syncProfiles, nativeMode, tz.api]);
+    srcRef.current = src;
+    initialTimeRef.current = initialTime;
+  }, [src, initialTime]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
-  function handleLoadedMetadata() {
+  const handleLoadedMetadata = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
     setDuration(v.duration || 0);
+    resumePlayback();
+  }, [setDuration, resumePlayback]);
 
-    // Tenta autoplay COM som primeiro (como YouTube/Netflix) — só cai pra
-    // mudo se o navegador rejeitar. Isso funciona sempre que o navegador já
-    // "confia" no site pra tocar som sozinho (ex: usuário já assistiu algo
-    // aqui com som antes); é a política de autoplay do navegador, não tem
-    // como forçar passar por cima dela, só tentar da forma mais provável de
-    // funcionar e cair pra mudo graciosamente quando não der.
-    function startPlayback() {
-      if (!v) return;
-      v.muted = false;
-      v.play()
-        .then(() => setMuted(false))
-        .catch(() => {
-          v.muted = true;
-          setMuted(true);
-          v.play().catch(() => {
-            // nem mudo tocou sozinho — fica pausado, usuário dá play manualmente
-          });
-        });
-    }
-
-    if (initialTime > 1 && initialTime < (v.duration || Infinity) - 2) {
-      // Buscar um ponto que ainda não foi baixado é assíncrono de verdade
-      // aqui — o vídeo é servido via Range Requests (ver /api/stream), então
-      // pular pra 1:32 exige um NOVO request ao servidor por aqueles bytes
-      // específicos antes do navegador ter algo pra tocar dali. Chamar
-      // play() imediatamente (como era antes), sem esperar isso terminar,
-      // deixava o navegador tocar o que já tinha bufferizado perto do
-      // início enquanto o relógio na tela ficava travado no valor pedido
-      // (timeupdate não dispara com uma seek pendente) — áudio e vídeo
-      // ficavam fora de sincronia até outra seek (ex: ±10s) forçar tudo a
-      // se resolver de vez, mas ainda mostrando o tempo errado. Esperar o
-      // evento "seeked" (o navegador confirmando que já buscou e
-      // posicionou tudo ali) antes de dar play evita a corrida inteira.
-      //
-      // MAS nunca dependendo SÓ disso: se "seeked" não vier (seek recusado,
-      // buffer negado, arquivo problemático...), esperar por ele pra sempre
-      // deixa o vídeo parado eternamente — e aí NADA funciona: os controles
-      // não somem (só somem com o vídeo tocando, ver scheduleHide), o
-      // relógio fica congelado no destino, e a tela fica preta. Um fallback
-      // curto garante que a reprodução comece de um jeito ou de outro.
-      let started = false;
-      let tentouDeNovo = false;
-      let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-      function startOnce() {
-        if (started) return;
-
-        // "seeked" disparar não é garantia de que a busca pousou onde
-        // pedimos. Os logs de streaming (ver stream-utils.ts) mostraram
-        // buscas grandes voltando pra perto de onde já estavam MESMO
-        // disparando "seeked" normalmente — provavelmente o request pelo
-        // trecho novo não completou a tempo e o navegador desistiu
-        // sozinho. Sem checar isso aqui, "continuar assistindo" às vezes
-        // recomeçava do zero sem avisar nada (o "fica preto, áudio começa
-        // do 0" relatado antes pode muito bem ter sido exatamente isto).
-        // Tenta a busca de novo, uma vez só, antes de aceitar onde caiu —
-        // nunca mais que isso, pra não arriscar travar esperando pra
-        // sempre se a rede estiver mesmo ruim.
-        const atual = videoRef.current;
-        const pousouLonge = atual && Math.abs(atual.currentTime - initialTime) > 5;
-        if (pousouLonge && !tentouDeNovo) {
-          tentouDeNovo = true;
-          atual.currentTime = initialTime;
-          return;
-        }
-
-        started = true;
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-        videoRef.current?.removeEventListener("seeked", startOnce);
-        startPlayback();
-      }
-      // Mais folga que antes (era 1500ms): uma tentativa extra de busca
-      // precisa de espaço pra um SEGUNDO round-trip de rede, não só um.
-      fallbackTimer = setTimeout(startOnce, RESUME_SEEK_TIMEOUT_MS);
-      v.addEventListener("seeked", startOnce);
-      v.currentTime = initialTime;
-    } else {
-      startPlayback();
-    }
+  function handleEnded() {
+    setEnded(true);
+    doSaveProgress();
+    if (onNextEpisode) startCountdown();
   }
 
-  function handleProgress() {
-    const v = videoRef.current;
-    if (!v || v.buffered.length === 0) return;
-    let end = 0;
-    for (let i = 0; i < v.buffered.length; i++) {
-      if (v.buffered.start(i) <= v.currentTime) end = v.buffered.end(i);
+  function handleReplay() {
+    if (nativeMode) {
+      tz.api.seekTo(0);
+      tz.api.play();
+      setCurrentTime(0);
+      setPlaying(true);
+    } else {
+      const v = videoRef.current;
+      if (v) {
+        v.currentTime = 0;
+        v.play().catch(() => {});
+      }
     }
-    setBufferedEnd(end);
+    setEnded(false);
+    cancelCountdown();
   }
 
   // Abre o AVPlay uma vez, quando a casca Tizen é confirmada — equivalente
   // ao <video src=...> montar e disparar o carregamento sozinho. Fecha ao
-  // desmontar (troca de episódio, saída — handleExit já fecha antes disso
-  // na prática, mas fechar de novo aqui é barato e cobre qualquer saída que
-  // não passe por handleExit).
+  // desmontar (handleExit já fecha antes disso na saída normal — ver
+  // releaseMedia acima — mas fechar de novo aqui é barato e cobre qualquer
+  // desmonte que não passe por ali, ex: troca direta de episódio).
   useEffect(() => {
     if (!nativeMode) return;
     tz.api.open(srcRef.current, initialTimeRef.current);
@@ -381,8 +308,8 @@ export function VideoPlayer({
   // AVPlay desenha num plano de hardware ATRÁS da página inteira — a casca
   // (tizen/index.html) precisa saber exatamente que retângulo da TELA
   // corresponde à área do vídeo pra posicionar esse plano ali (setDisplayRect
-  // usa coordenadas de tela, não do documento). Reporta de novo sempre que
-  // o layout pode ter mudado.
+  // usa coordenadas de tela, não do documento). Reporta de novo sempre que o
+  // layout pode ter mudado.
   useEffect(() => {
     if (!nativeMode) return;
     function reportarRect() {
@@ -400,18 +327,18 @@ export function VideoPlayer({
     };
   }, [nativeMode, tz.api]);
 
-  // Espelha o estado do AVPlay (que chega por postMessage, ver
-  // tizen-player-bridge.ts) nos MESMOS estados do React que o ramo <video>
-  // já alimenta via onTimeUpdate/onProgress/onPlay/onEnded/onError — assim
-  // TODO o JSX abaixo (barra de progresso, spinner, tela de erro...)
-  // continua funcionando sem saber qual dos dois motores está tocando.
+  // Espelha o estado do AVPlay (que chega por postMessage) nos MESMOS
+  // estados do React que o ramo <video> já alimenta via onTimeUpdate/
+  // onProgress/onPlay/onEnded/onError — assim todo o JSX abaixo (barra de
+  // progresso, spinner, tela de erro...) continua funcionando sem saber
+  // qual dos dois motores está tocando.
   useEffect(() => {
     if (!nativeMode) return;
     const s = tz.state;
     // Espelhamento de propósito: este efeito existe só pra sincronizar
     // estado que chega de FORA (postMessage da casca Tizen) — é exatamente
     // o caso de uso que a regra abaixo permite desativar.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setDuration(s.duration);
     setCurrentTime(s.currentTime);
     setPlaying(!s.paused);
@@ -424,441 +351,12 @@ export function VideoPlayer({
       setLoading(false);
     }
     if (s.ended && !ended) handleEnded();
+    /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nativeMode, tz.state]);
 
-  // salva progresso periodicamente enquanto toca, e ao sair/trocar de título
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (videoRef.current && !videoRef.current.paused) doSaveProgress();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [doSaveProgress]);
-
-  // Some sozinho depois de tocar a animação (ver .seek-flash no CSS) — tem
-  // que bater com a duração dela.
-  useEffect(() => {
-    if (!seekFlash) return;
-    const t = setTimeout(() => setSeekFlash(null), 700);
-    return () => clearTimeout(t);
-  }, [seekFlash]);
-
-  useEffect(() => {
-    // Captura o nó agora (continua válido até o desmonte de verdade) pra
-    // não ler videoRef.current dentro do cleanup, que já pode ter mudado.
-    const videoNode = videoRef.current;
-    return () => {
-      // Os valores (currentTime/duration) são lidos AGORA, no desmonte, com
-      // o elemento ainda válido — mas a chamada que atualiza estado
-      // (saveProgress) é adiada pra depois do commit atual. Esse desmonte
-      // quase sempre acontece junto de uma troca de rota (usuário saindo
-      // do player) — chamar setState de um contexto ancestral de forma
-      // síncrona bem no meio dessa transição pode fazer o React/Next.js
-      // abandonar a navegação em andamento silenciosamente.
-      if (!videoNode || !videoNode.duration) return;
-      const snapshot = { t: videoNode.currentTime, d: videoNode.duration };
-      setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
-    };
-  }, [saveProgress, titleId, episodeId]);
-
-  function togglePlay() {
-    if (nativeMode) {
-      const estavaPausado = tzStateRef.current.paused;
-      if (estavaPausado) {
-        tz.api.play();
-        setPlaying(true);
-        showOverlay();
-      } else {
-        tz.api.pause();
-        setPlaying(false);
-      }
-      return;
-    }
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
-  }
-
-  function seekBy(delta: number) {
-    if (nativeMode) {
-      const max = tzStateRef.current.duration || Infinity;
-      const next = Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max);
-      tz.api.seekTo(next);
-      setCurrentTime(next);
-      showOverlay();
-      return;
-    }
-    const v = videoRef.current;
-    if (!v) return;
-    const max = v.duration || Infinity;
-    const next = Math.min(Math.max(0, v.currentTime + delta), max);
-    v.currentTime = next;
-    // feedback visual na hora (barra/tempo) sem esperar o próximo evento
-    // `timeupdate` do navegador, que pode demorar a disparar depois de um seek
-    setCurrentTime(next);
-    showOverlay();
-  }
-
-  function seekToPct(pct: number) {
-    if (nativeMode) {
-      const duration = tzStateRef.current.duration;
-      if (!duration) return;
-      const next = Math.min(Math.max(0, pct), 1) * duration;
-      tz.api.seekTo(next);
-      setCurrentTime(next);
-      return;
-    }
-    const v = videoRef.current;
-    if (!v || !v.duration) return;
-    const next = Math.min(Math.max(0, pct), 1) * v.duration;
-    v.currentTime = next;
-    setCurrentTime(next);
-  }
-
-  function pctFromClientX(clientX: number): number {
-    const el = progressRef.current;
-    if (!el) return 0;
-    const rect = el.getBoundingClientRect();
-    return (clientX - rect.left) / rect.width;
-  }
-
-  function handleProgressPointerDown(e: PointerEvent<HTMLDivElement>) {
-    draggingRef.current = true;
-    setDragging(true);
-    const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
-    dragPctRef.current = pct;
-    // clique simples (sem arrastar) já busca a posição na hora
-    seekToPct(pct);
-    if (duration) setPreview({ pct, time: pct * duration });
-    showOverlay();
-    // setPointerCapture só garante que pointermove/pointerup continuem
-    // chegando aqui se o ponteiro sair da barra durante um arrasto — não é
-    // essencial pro clique simples acima, que já aconteceu. Precisa ficar
-    // DEPOIS do seek e dentro de um try/catch: o navegador da TV (Tizen,
-    // acessado direto pelo browser, sem ser via app) tem uma implementação
-    // de Pointer Events incompleta/instável, e essa chamada pode lançar
-    // nele. Antes, ela era a primeira linha da função — a exceção abortava
-    // tudo antes de chegar no seekToPct, fazendo o clique não fazer nada
-    // (o preview no hover funcionava normal porque só depende de
-    // pointermove, que nunca passa por essa chamada).
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // sem suporte/instável neste navegador — degrada bem: o clique simples
-      // já funcionou acima, só um arrasto saindo da barra pode não continuar
-      // sendo rastreado perfeitamente.
-    }
-  }
-  function handleProgressPointerMove(e: PointerEvent<HTMLDivElement>) {
-    const pct = Math.min(Math.max(0, pctFromClientX(e.clientX)), 1);
-    if (duration) setPreview({ pct, time: pct * duration });
-    if (draggingRef.current) {
-      // Enquanto arrasta, só atualiza o preview (visual) — buscar a cada
-      // pixel de movimento faz um request novo pro Drive a cada tick e
-      // trava tudo. O seek de verdade só acontece uma vez, ao soltar.
-      dragPctRef.current = pct;
-    }
-  }
-  function handleProgressPointerUp() {
-    if (draggingRef.current && dragPctRef.current !== null) {
-      seekToPct(dragPctRef.current);
-    }
-    draggingRef.current = false;
-    dragPctRef.current = null;
-    setDragging(false);
-    setPreview(null);
-  }
-  function handleProgressPointerLeave() {
-    if (!draggingRef.current) setPreview(null);
-  }
-  function handleProgressKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowRight") seekBy(5);
-    else if (e.key === "ArrowLeft") seekBy(-5);
-  }
-
-  function isControlTarget(el: EventTarget | null): boolean {
-    // Element, não HTMLElement: os ícones dos botões (voltar, play/pause,
-    // ±10s, mudo, tela cheia...) são <svg>/<path>, que são SVGElement —
-    // uma hierarquia de classes SEPARADA de HTMLElement no navegador (uma
-    // não é instância da outra). Com o check em HTMLElement, um clique que
-    // acertasse o desenho do ícone (o alvo visual óbvio de qualquer botão)
-    // never passava no closest() abaixo — a exclusão simplesmente não
-    // rodava — e o clique vazava pra handleVideoAreaClick, disparando
-    // togglePlay() junto. Isso ficou invisível enquanto esse handler só
-    // vivia no <video> (irmão dos controles, nunca alcançado por um clique
-    // neles) — virou um bug de verdade assim que passou a viver no
-    // .player-shell (ver handleVideoAreaClick/handleTouchEnd), alcançável
-    // por clique em QUALQUER botão do player. Element é a interface comum
-    // a HTML e SVG — closest() existe nela pros dois.
-    return el instanceof Element
-      ? Boolean(el.closest("button, .progress-bar, .volume-slider, .rate-select"))
-      : false;
-  }
-
-  // Clicar/tocar no vídeo em si NÃO alterna play/pause — só o botão
-  // dedicado (.player-center) faz isso. Um toque na área do vídeo era fácil
-  // demais de disparar sem querer (segurar o celular, um duplo-toque que
-  // "vazava" um toque simples primeiro, etc.), e cada vez que isso
-  // acontecia bem no meio de outra coisa (uma troca de rota, por exemplo)
-  // era mais uma chance de esbarrar na classe de bug do botão de voltar que
-  // já perseguimos várias vezes nesta base de código. Só acorda os
-  // controles (showOverlay) — bem mais previsível.
-  function handleVideoAreaClick(e: React.MouseEvent) {
-    if (isControlTarget(e.target)) return;
-    showOverlay();
-  }
-
-  function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
-    if (isControlTarget(e.target)) return;
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-    e.preventDefault();
-
-    // Acorda os controles na hora, sem esperar pra ver se vira duplo-toque
-    // — não tem mais nada pra "desambiguar" aqui (o toque simples não faz
-    // mais nada além disso), então não tem por que atrasar. O duplo-toque
-    // (abaixo) já acorda os controles de novo por conta própria (via
-    // seekBy), sem problema nenhum em chamar showOverlay() duas vezes.
-    showOverlay();
-
-    const now = Date.now();
-    const last = lastTapRef.current;
-    if (last && now - last.t < DOUBLE_TAP_MS) {
-      lastTapRef.current = null;
-      const half = window.innerWidth / 2;
-      const isLeft = touch.clientX < half;
-      seekBy(isLeft ? -10 : 10);
-      seekFlashIdRef.current += 1;
-      setSeekFlash({ dir: isLeft ? "back" : "fwd", id: seekFlashIdRef.current });
-    } else {
-      lastTapRef.current = { t: now };
-    }
-  }
-
-  function toggleMute() {
-    // AVPlay não expõe volume por instância (é sempre o volume do sistema,
-    // controlado pelo controle remoto físico) — em modo nativo o botão só
-    // atualiza o desenho na tela, sem efeito real no áudio. Mesma limitação
-    // de plataforma do comentário abaixo pro iOS Safari, só que aqui não
-    // tem nem um jeito alternativo de mudar volume programaticamente.
-    if (nativeMode) {
-      setMuted((m) => !m);
-      return;
-    }
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  }
-
-  function handleVolumeChange(e: ChangeEvent<HTMLInputElement>) {
-    const value = parseFloat(e.target.value);
-    if (nativeMode) {
-      // Ver toggleMute: fica só visual em modo nativo.
-      setVolume(value);
-      setMuted(value === 0);
-      return;
-    }
-    const v = videoRef.current;
-    if (!v) return;
-    // iOS Safari ignora volume via JS (só o usuário controla pelos botões
-    // físicos) — o slider fica visível mas sem efeito lá, é limitação da
-    // plataforma, não bug nosso.
-    v.volume = value;
-    setVolume(value);
-    const shouldMute = value === 0;
-    v.muted = shouldMute;
-    setMuted(shouldMute);
-  }
-
-  function handleRateChange(e: ChangeEvent<HTMLSelectElement>) {
-    const next = parseFloat(e.target.value);
-    if (nativeMode) {
-      tz.api.setSpeed(next);
-      setRate(next);
-      return;
-    }
-    const v = videoRef.current;
-    if (!v) return;
-    v.playbackRate = next;
-    setRate(next);
-  }
-
-  function toggleFullscreen() {
-    // shellRef, não videoRef.closest(...): em modo nativo não existe
-    // <video> nenhum, então precisa de um jeito de achar o container que
-    // não dependa dele — e funciona idêntico pro <video> normal, já que é
-    // o mesmo nó (.player-shell) que v.closest(".player-shell") sempre
-    // encontrava.
-    const container = shellRef.current;
-    if (container && typeof container.requestFullscreen === "function") {
-      if (!document.fullscreenElement) container.requestFullscreen().catch(() => {});
-      else document.exitFullscreen();
-      return;
-    }
-
-    // Só chega aqui em navegador sem Fullscreen API padrão (ex: iOS
-    // Safari) — modo nativo nunca ativa fora da casca Tizen, que tem a API
-    // padrão, então videoRef sempre existe neste ramo.
-    const v = videoRef.current as WebkitVideoElement | null;
-    if (!v) return;
-
-    // Chegou aqui = não tem Fullscreen API padrão no container (ex: iOS
-    // Safari, que só implementa fullscreen próprio no <video> mesmo — API
-    // da Apple, não a padrão). A TV Tizen tem a API padrão (tratada acima),
-    // então nunca cai neste ramo — é o que evita reproduzir o bug antigo:
-    // webkitEnterFullscreen troca pra uma camada de renderização separada
-    // que cobre a página inteira, com os controles NATIVOS do navegador em
-    // vez dos nossos (sumiam os botões ±10s, a barra de progresso, o
-    // overlay de debug — nada do nosso DOM aparece mais por cima naquele
-    // modo).
-    if (v.webkitEnterFullscreen) {
-      if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen?.();
-      else v.webkitEnterFullscreen();
-    }
-  }
-
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  useEffect(() => {
-    function onFsChange() {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    }
-    document.addEventListener("fullscreenchange", onFsChange);
-
-    // iOS não dispara "fullscreenchange" pro fullscreen nativo do <video> —
-    // tem seus próprios eventos.
-    const v = videoRef.current as WebkitVideoElement | null;
-    function onBegin() {
-      setIsFullscreen(true);
-    }
-    function onEnd() {
-      setIsFullscreen(false);
-    }
-    v?.addEventListener("webkitbeginfullscreen", onBegin);
-    v?.addEventListener("webkitendfullscreen", onEnd);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
-      v?.removeEventListener("webkitbeginfullscreen", onBegin);
-      v?.removeEventListener("webkitendfullscreen", onEnd);
-    };
-  }, []);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      // Qualquer tecla conta como atividade e acorda os controles — sem
-      // isso, só onMouseMove resetava o timer de auto-esconder (ver
-      // .player-shell). Um controle remoto de TV nunca dispara mousemove,
-      // então depois de ~3s os controles (inclusive o botão de voltar,
-      // que também passou a sumir visualmente — ver .player-top.hidden)
-      // ficavam com pointer-events:none, parecendo "quebrados": Cima/Baixo
-      // (usados pra navegar entre eles, ver tv-nav.ts) eram as únicas
-      // teclas que não passavam por aqui pra reativar o overlay.
-      showOverlay();
-
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      // A barra de progresso (role="slider", uma <div>, não pega no check
-      // de tag abaixo) tem seu próprio onKeyDown (handleProgressKeyDown,
-      // ±5s) — sem essa exclusão aqui, focar nela e apertar seta disparava
-      // OS DOIS handlers pro mesmo tecla (±5 daqui, ±10 do handler global
-      // logo abaixo), somando 15s por vez em vez de avançar do jeito certo.
-      const isSlider = target?.getAttribute("role") === "slider";
-      // Só exclui campos com uso NATIVO próprio pra seta (o <select> de
-      // velocidade navega opções, o <input type=range> do volume muda de
-      // valor) — um <button> comum (play/pause, ±10s, mudo, tela cheia...)
-      // não tem comportamento nativo pra seta nenhum, então não deveria
-      // bloquear o seek global. Isso importa de verdade num controle de TV:
-      // sem mouse, o D-pad só alcança ±10s/±5s FOCANDO um botão primeiro
-      // (ver tv-nav.ts) — excluir BUTTON aqui deixava ArrowLeft/Right sem
-      // efeito nenhum sempre que o foco estivesse em qualquer botão do
-      // player, ou seja, na prática o tempo todo no controle remoto.
-      const isRealFormControl = tag === "SELECT" || tag === "INPUT";
-      if ((e.key === " " || e.code === "Space") && !isRealFormControl) {
-        e.preventDefault();
-        togglePlay();
-        showOverlay();
-      } else if (e.key === "ArrowRight" && !isRealFormControl && !isSlider) {
-        seekBy(10);
-      } else if (e.key === "ArrowLeft" && !isRealFormControl && !isSlider) {
-        seekBy(-10);
-      } else if (e.key === "Escape" || e.keyCode === 10009) {
-        // 10009 = physical "Return"/back button on Samsung TV remotes
-        // (Tizen WebKit), not the same key as Escape — handled here too so
-        // the remote's back button exits the player directly, same as
-        // Escape does on a keyboard.
-        handleExit();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleExit]);
-
-  function handleEnded() {
-    setEnded(true);
-    doSaveProgress();
-    if (onNextEpisode) setNextCountdown(NEXT_EPISODE_COUNTDOWN_S);
-  }
-
-  // onNextEpisode é uma função nova a cada render de WatchInner (closure
-  // inline) — troca de identidade sempre que aquele componente re-renderiza
-  // por qualquer motivo (ex: o próprio doSaveProgress mexendo no contexto de
-  // perfis). Se ela estivesse nas deps do efeito abaixo, cada uma dessas
-  // trocas reiniciaria o setTimeout de 1s do zero, e a contagem podia nunca
-  // chegar a disparar de verdade. Uma ref sempre aponta pra versão mais
-  // recente sem forçar o efeito a re-rodar por causa dela.
-  const onNextEpisodeRef = useRef(onNextEpisode);
-  useEffect(() => {
-    onNextEpisodeRef.current = onNextEpisode;
-  }, [onNextEpisode]);
-
-  // Contagem regressiva pro próximo episódio: um segundo por vez. O
-  // setState que zera o estado e dispara onNextEpisode acontece dentro do
-  // callback do setTimeout (assíncrono), nunca direto no corpo do efeito —
-  // evita disparar duas vezes e mantém só uma fonte de verdade pro "acabou
-  // a contagem". Cancelar (ou dar replay) também só zera esse estado.
-  useEffect(() => {
-    if (nextCountdown === null) return;
-    const t = setTimeout(() => {
-      if (nextCountdown <= 1) {
-        setNextCountdown(null);
-        // onNextEpisode chama router.replace(...), que o Next.js processa
-        // como uma transição de baixa prioridade. Chamar isso no MESMO
-        // tick síncrono que o setNextCountdown(null) acima faz o React
-        // batelar os dois — e o React pode descartar/atrasar a transição
-        // de navegação em favor do update local, fazendo o toast sumir sem
-        // trocar de episódio (só navegando bem mais tarde, de forma
-        // solta, ex: no próximo clique). Mesma causa raiz do bug já
-        // corrigido em onPause/no efeito de desmonte: nunca misturar um
-        // router.replace/push com outro setState no mesmo tick síncrono.
-        // Adiar pro próximo tick resolve.
-        setTimeout(() => onNextEpisodeRef.current?.(), 0);
-      } else {
-        setNextCountdown(nextCountdown - 1);
-      }
-    }, 1000);
-    return () => clearTimeout(t);
-  }, [nextCountdown]);
-
-  function cancelNextEpisode() {
-    setNextCountdown(null);
-  }
-
-  function handleReplay() {
-    const v = videoRef.current;
-    if (v) {
-      v.currentTime = 0;
-      v.play().catch(() => {});
-    }
-    setEnded(false);
-    setNextCountdown(null);
-  }
-
   const pct = duration ? (currentTime / duration) * 100 : 0;
   const bufferedPct = duration ? (bufferedEnd / duration) * 100 : 0;
-  const VolumeIcon = muted || volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
 
   return (
     <div
@@ -876,10 +374,7 @@ export function VideoPlayer({
           nessa área nunca chega no <video> — elementos irmãos não propagam
           evento um pro outro. Só bindar aqui é que garante que o gesto
           funciona também quando os controles estão visíveis, que é a
-          situação mais comum (é por isso que o duplo-toque parecia nunca
-          funcionar: só funcionava na rara janela em que os controles já
-          tinham sumido sozinhos). isControlTarget continua filtrando
-          cliques que caem em cima de um botão/slider de verdade. */}
+          situação mais comum. */}
       {nativeMode ? (
         // Sem <video> nenhum aqui de propósito: o vídeo de verdade é
         // desenhado pelo AVPlay da casca Tizen, NUM PLANO ATRÁS desta
@@ -899,12 +394,9 @@ export function VideoPlayer({
           disableRemotePlayback
           // Nunca focável: em webviews de TV há relatos de que um <video>
           // com foco nativo pode capturar as teclas de seta do controle pra
-          // trick-play próprio ANTES de qualquer JS vê-las — o que bateria
-          // certo com "os botões ±10s não fazem nada na TV" continuando a
-          // funcionar em touch/web (onde essa disputa não existe). O foco no
-          // player sempre fica num elemento de controle (botão, barra de
-          // progresso — ver tv-nav.ts), nunca no vídeo em si, então isto não
-          // tira alcance de ninguém.
+          // trick-play próprio ANTES de qualquer JS vê-las. O foco no player
+          // sempre fica num elemento de controle (botão, barra de progresso —
+          // ver tv-nav.ts), nunca no vídeo em si.
           tabIndex={-1}
           controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
           onLoadedMetadata={handleLoadedMetadata}
@@ -912,7 +404,7 @@ export function VideoPlayer({
             if (exitingRef.current) return;
             setCurrentTime(e.currentTarget.currentTime);
           }}
-          onProgress={handleProgress}
+          onProgress={onProgress}
           onPlay={() => {
             setPlaying(true);
             showOverlay();
@@ -924,8 +416,8 @@ export function VideoPlayer({
             setPlaying(false);
             // O navegador dispara "pause" nativamente ao remover o <video> do
             // DOM — bem no meio de uma troca de rota (ex: "voltar" com o vídeo
-            // tocando). doSaveProgress já adia a parte que importa (ver sua
-            // definição) — é por isso que chamar direto aqui é seguro.
+            // tocando). doSaveProgress já adia a parte que importa — é por
+            // isso que chamar direto aqui é seguro.
             doSaveProgress();
           }}
           onEnded={handleEnded}
@@ -936,14 +428,7 @@ export function VideoPlayer({
             setHasPlayedOnce(true);
           }}
           onError={(e) => {
-            // navegador não conseguiu decodificar/abrir o arquivo (contêiner
-            // não suportado, arquivo corrompido, MAS TAMBÉM uma resposta de
-            // erro HTTP no lugar dos bytes do vídeo — ex: um 403/429/500 do
-            // nosso próprio servidor) — para de girar o spinner pra sempre e
-            // avisa em vez de travar. Guarda o MediaError de verdade (ver
-            // playbackErrorDetail) pra não esconder qual dessas causas foi.
-            //
-            // Durante a saída (ver handleExit) a gente solta a mídia de
+            // Durante a saída (ver useExitPlayer) a gente solta a mídia de
             // propósito, o que faz alguns navegadores dispararem "error" de
             // src vazio — isso não é falha nenhuma, e mostrar a tela de erro
             // por uma fração de segundo bem na hora de sair seria só ruído.
@@ -959,159 +444,48 @@ export function VideoPlayer({
         />
       ) : null /* tz.active ainda null: handshake com a casca em andamento — mesma tela de carregamento de sempre, sem <video> nem área nativa até decidir */}
 
-      {/* Independente de .player-overlay/controls-hidden de propósito — o
-          feedback do seek tem que aparecer mesmo se os controles já
-          sumiram por inatividade (é bem comum dar duplo-toque justo
-          quando eles estão escondidos). pointer-events:none no CSS: nunca
-          deve atrapalhar nenhum toque por baixo. */}
-      {seekFlash && (
-        <div key={seekFlash.id} className={`seek-flash seek-flash-${seekFlash.dir}`}>
-          <div className="seek-flash-badge">
-            {seekFlash.dir === "back" ? <Back10Icon /> : <Forward10Icon />}
-            <span>10 segundos</span>
-          </div>
-        </div>
-      )}
+      <SeekFlashBadge flash={seekFlash} />
 
-      {/* Fica fora da camada que soma opacity+pointer-events com o resto dos
-          controles (.player-overlay) — mas ainda assim SOME visualmente
-          junto com o resto por inatividade (classe "hidden" abaixo, só
-          opacity). A diferença é só que aqui pointer-events continua
-          "auto": sair do player precisa funcionar sempre, mesmo com os
-          controles escondidos — não devia exigir um primeiro toque só pra
-          "acordar" os controles antes de conseguir voltar. */}
-      <div className={`player-top${overlayHidden ? " hidden" : ""}`}>
-        <button onClick={handleExit} aria-label="Voltar">
-          <BackArrowIcon />
-        </button>
-        <div className="player-title">{displayTitle}</div>
-      </div>
+      <PlayerTopBar hidden={overlayHidden} title={displayTitle} onExit={handleExit} />
 
       <div className={`player-overlay${overlayHidden ? " hidden" : ""}`}>
         {playbackError ? (
-          <div className="player-center">
-            <div className="player-error">
-              <p>Não foi possível reproduzir este vídeo.</p>
-              <p className="player-error-hint">
-                {playbackErrorDetail?.code === 2
-                  ? // MEDIA_ERR_NETWORK: o navegador NÃO recebeu o arquivo de
-                    // vídeo de verdade — algo entre ele e o servidor falhou
-                    // (conexão caiu, CORS bloqueou, o servidor respondeu
-                    // com erro em vez dos bytes do vídeo). Não é o formato.
-                    "Falha de rede ao carregar o vídeo — não chegou a baixar o suficiente pra tocar. Verifique a conexão com o servidor e tente de novo."
-                  : playbackErrorDetail?.code === 3
-                    ? // MEDIA_ERR_DECODE: os bytes chegaram, mas o navegador
-                      // não conseguiu decodificá-los (arquivo corrompido, ou
-                      // um codec dentro do contêiner que ele não suporta).
-                      "O navegador recebeu o arquivo mas não conseguiu decodificá-lo — o codec dentro dele pode não ser suportado, ou o arquivo está corrompido."
-                    : "O formato do arquivo pode não ser compatível com o navegador (ex: .mkv não toca em Chrome/Safari — prefira .mp4 com vídeo H.264 e áudio AAC)."}
-              </p>
-              {playbackErrorDetail && (
-                <p className="player-error-code">
-                  Detalhe técnico: código {playbackErrorDetail.code ?? "?"} — {playbackErrorDetail.message}
-                </p>
-              )}
-            </div>
-          </div>
+          <PlaybackErrorPanel detail={playbackErrorDetail} />
         ) : loading && !hasPlayedOnce ? (
           // carregamento inicial: ainda não há nada pra interagir mesmo
           <div className="player-center">
             <div className="spinner" />
           </div>
         ) : (
-          // depois do primeiro play, um rebuffer (ex: logo após um seek) não
-          // esconde mais os botões — só troca o play/pause por um spinner
-          // pequeno, ±10s continuam clicáveis normalmente
-          <div className="player-center">
-            <button onClick={() => seekBy(-10)} aria-label="Voltar 10 segundos">
-              <Back10Icon />
-            </button>
-            {loading ? (
-              <div className="spinner spinner-inline" />
-            ) : ended ? (
-              <button className="player-playpause" onClick={handleReplay} aria-label="Assistir de novo">
-                <ReplayIcon />
-              </button>
-            ) : (
-              <button
-                className="player-playpause"
-                onClick={togglePlay}
-                aria-label={playing ? "Pausar" : "Reproduzir"}
-              >
-                {playing ? <PauseIcon /> : <PlayIcon />}
-              </button>
-            )}
-            <button onClick={() => seekBy(10)} aria-label="Avançar 10 segundos">
-              <Forward10Icon />
-            </button>
-          </div>
+          <PlayerCenterControls
+            playing={playing}
+            ended={ended}
+            loading={loading}
+            onSeekBack={() => seekBy(-10)}
+            onSeekForward={() => seekBy(10)}
+            onTogglePlay={togglePlay}
+            onReplay={handleReplay}
+          />
         )}
 
         <div className="player-bottom">
-          <div className="progress-row">
-            <span className="time">{fmtTime(currentTime)}</span>
-            <div
-              className={`progress-bar${dragging ? " dragging" : ""}`}
-              ref={progressRef}
-              onPointerDown={handleProgressPointerDown}
-              onPointerMove={handleProgressPointerMove}
-              onPointerUp={handleProgressPointerUp}
-              onPointerLeave={handleProgressPointerLeave}
-              onKeyDown={handleProgressKeyDown}
-              role="slider"
-              aria-label="Progresso do vídeo"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(pct)}
-              tabIndex={0}
-            >
-              {preview && (
-                <div className="progress-tooltip" style={{ left: `${preview.pct * 100}%` }}>
-                  {fmtTime(preview.time)}
-                </div>
-              )}
-              <div className="progress-track">
-                <div className="progress-buffered" style={{ width: `${bufferedPct}%` }} />
-              </div>
-              <div className="progress-fill" style={{ width: `${pct}%` }} />
-              <div className="progress-handle" style={{ left: `${pct}%` }} />
-            </div>
-            <span className="time">{fmtTime(duration)}</span>
-          </div>
+          <ProgressBar
+            progressRef={progressRef}
+            currentTime={currentTime}
+            duration={duration}
+            pct={pct}
+            bufferedPct={bufferedPct}
+            dragging={dragging}
+            preview={preview}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onKeyDown={(e) => handleProgressKeyDown(e, seekBy)}
+          />
           <div className="player-controls-row">
-            <div className="volume-control">
-              <button onClick={toggleMute} aria-label={muted ? "Ativar som" : "Silenciar"}>
-                <VolumeIcon />
-              </button>
-              <input
-                className="volume-slider"
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                onChange={handleVolumeChange}
-                aria-label="Volume"
-              />
-            </div>
-
-            <div className="rate-select-wrap">
-              <select
-                className="rate-select"
-                value={rate}
-                onChange={handleRateChange}
-                aria-label="Velocidade de reprodução"
-              >
-                {RATES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}x
-                  </option>
-                ))}
-              </select>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </div>
+            <VolumeControl muted={muted} volume={volume} onToggleMute={toggleMute} onVolumeChange={handleVolumeChange} />
+            <RateSelect rate={rate} onChange={handleRateChange} />
 
             {onNextEpisode && (
               <button className="next-ep-btn" onClick={onNextEpisode} aria-label="Próximo episódio">
@@ -1127,16 +501,7 @@ export function VideoPlayer({
         </div>
       </div>
 
-      {/* Canto inferior direito, discreto (não bloqueia nada por baixo —
-          diferente do antigo modal de "fim do vídeo", que cobria a tela
-          inteira e travava até o botão de voltar). Só aparece com próximo
-          episódio disponível; cancelar ou dar replay já limpa o estado. */}
-      {nextCountdown !== null && (
-        <div className="next-up-toast">
-          <span>Iniciando o próximo em {nextCountdown}…</span>
-          <button onClick={cancelNextEpisode}>Cancelar</button>
-        </div>
-      )}
+      {nextCountdown !== null && <NextUpToast secondsLeft={nextCountdown} onCancel={cancelCountdown} />}
     </div>
   );
 }
