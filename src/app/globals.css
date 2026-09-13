@@ -25,6 +25,16 @@ body {
   color: var(--text);
   font-family: var(--font);
 }
+/* Ligado/desligado pelo próprio VideoPlayer (ver o efeito de abertura do
+   AVPlay) enquanto o player nativo está tocando — precisa ir até aqui,
+   html/body, porque .player-shell.native-player sozinho não basta: eles
+   ficam ATRÁS dele na pilha de pintura da página, e um <html>/<body> opaco
+   também tampa o plano de vídeo da TV, do mesmo jeito que .player-shell
+   tamparia. */
+html.native-player-ativo,
+body.native-player-ativo {
+  background: transparent !important;
+}
 
 body {
   -webkit-tap-highlight-color: transparent;
@@ -833,6 +843,20 @@ a {
   height: 100%;
   object-fit: contain;
   background: #000;
+}
+/* Modo player nativo (AVPlay via casca Tizen — ver tizen-player-bridge.ts):
+   o vídeo de verdade é desenhado pela TV NUM PLANO DE HARDWARE ATRÁS de
+   toda a página, não dentro do DOM. Qualquer fundo opaco aqui (ou em html/
+   body, ver abaixo) tampa esse plano por completo, sem erro nenhum — dá
+   pra passar horas achando que "não abriu" quando só está encoberto. Por
+   isso .player-video-native fica transparente em vez de #000 (diferente do
+   <video> normal, que É opaco de propósito pra nunca vazar o que tem atrás
+   antes do vídeo carregar). */
+.player-shell.native-player {
+  background: transparent;
+}
+.player-video-native {
+  background: transparent;
 }
 .player-overlay {
   position: absolute;

@@ -12,6 +12,7 @@ import {
 import { useProfiles } from "@/context/profile-context";
 import { streamUrl } from "@/lib/api-client";
 import { fmtTime } from "@/lib/format";
+import { useTizenPlayer } from "@/lib/tizen-player-bridge";
 import {
   Back10Icon,
   BackArrowIcon,
@@ -71,11 +72,26 @@ export function VideoPlayer({
   onNextEpisode,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const nativeAreaRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ t: number } | null>(null);
   const draggingRef = useRef(false);
   const dragPctRef = useRef<number | null>(null);
+
+  // Player nativo da TV (AVPlay), só existe dentro da casca Tizen — ver
+  // tizen-player-bridge.ts pro porquê. `active` fica null até o handshake
+  // resolver (quase instantâneo); PC/celular/web sempre resolvem pra false.
+  const tz = useTizenPlayer();
+  const nativeMode = tz.active === true;
+  // Espelho síncrono de tz.state pra ler sem depender do ciclo de render
+  // (mesmo motivo de doSaveProgress ler v.currentTime direto em vez de
+  // estado do React — ver o comentário lá).
+  const tzStateRef = useRef(tz.state);
+  useEffect(() => {
+    tzStateRef.current = tz.state;
+  }, [tz.state]);
 
   const { saveProgress, syncProfiles } = useProfiles();
 
@@ -124,6 +140,13 @@ export function VideoPlayer({
   const seekFlashIdRef = useRef(0);
 
   const src = streamUrl(titleId, episodeId);
+  // Capturados em ref pro efeito de abertura do AVPlay (abaixo) não precisar
+  // reabrir o vídeo a cada re-render — só lê o valor mais recente na hora
+  // que dispara, mesma lógica de outras refs "espelho" já usadas no arquivo.
+  const srcRef = useRef(src);
+  srcRef.current = src;
+  const initialTimeRef = useRef(initialTime);
+  initialTimeRef.current = initialTime;
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -159,6 +182,16 @@ export function VideoPlayer({
   // na hora (síncrono, com o <video> ainda garantidamente válido) — só a
   // chamada que toca o contexto ancestral é que espera o próximo tick.
   const doSaveProgress = useCallback(() => {
+    if (nativeMode) {
+      // Mesmo cuidado do ramo <video> abaixo, só que lendo do espelho do
+      // AVPlay: `seeking` true = busca em andamento, currentTime ainda não
+      // reflete o destino.
+      const s = tzStateRef.current;
+      if (!s.duration || s.seeking) return;
+      const snapshot = { t: s.currentTime, d: s.duration };
+      setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
+      return;
+    }
     const v = videoRef.current;
     if (!v || !v.duration) return;
     // v.seeking true = uma busca ainda em andamento (ex: o seek de
@@ -175,7 +208,7 @@ export function VideoPlayer({
     if (v.seeking) return;
     const snapshot = { t: v.currentTime, d: v.duration };
     setTimeout(() => saveProgress(titleId, episodeId, snapshot.t, snapshot.d), 0);
-  }, [saveProgress, titleId, episodeId]);
+  }, [saveProgress, titleId, episodeId, nativeMode]);
 
   /**
    * Sair do player. O ponto aqui é a navegação acontecer NA HORA, e tudo
@@ -206,14 +239,19 @@ export function VideoPlayer({
     // conexões que o streaming segurava. Fica pro próximo tick pra não
     // atravessar o commit da navegação.
     setTimeout(() => {
-      const v = videoRef.current;
-      if (!v) return;
-      try {
-        v.pause();
-        v.removeAttribute("src");
-        v.load();
-      } catch {
-        // se o navegador reclamar, tudo bem: já saímos, que é o que importa
+      if (nativeMode) {
+        tz.api.close();
+      } else {
+        const v = videoRef.current;
+        if (v) {
+          try {
+            v.pause();
+            v.removeAttribute("src");
+            v.load();
+          } catch {
+            // se o navegador reclamar, tudo bem: já saímos, que é o que importa
+          }
+        }
       }
 
       // Agora sim, com a navegação já feita e a mídia solta, o progresso
@@ -224,7 +262,7 @@ export function VideoPlayer({
       // inclui o minuto em que o vídeo parou.
       syncProfiles();
     }, 0);
-  }, [doSaveProgress, onExit, syncProfiles]);
+  }, [doSaveProgress, onExit, syncProfiles, nativeMode, tz.api]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
   function handleLoadedMetadata() {
@@ -322,6 +360,73 @@ export function VideoPlayer({
     setBufferedEnd(end);
   }
 
+  // Abre o AVPlay uma vez, quando a casca Tizen é confirmada — equivalente
+  // ao <video src=...> montar e disparar o carregamento sozinho. Fecha ao
+  // desmontar (troca de episódio, saída — handleExit já fecha antes disso
+  // na prática, mas fechar de novo aqui é barato e cobre qualquer saída que
+  // não passe por handleExit).
+  useEffect(() => {
+    if (!nativeMode) return;
+    tz.api.open(srcRef.current, initialTimeRef.current);
+    document.documentElement.classList.add("native-player-ativo");
+    document.body.classList.add("native-player-ativo");
+    return () => {
+      document.documentElement.classList.remove("native-player-ativo");
+      document.body.classList.remove("native-player-ativo");
+      tz.api.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nativeMode]);
+
+  // AVPlay desenha num plano de hardware ATRÁS da página inteira — a casca
+  // (tizen/index.html) precisa saber exatamente que retângulo da TELA
+  // corresponde à área do vídeo pra posicionar esse plano ali (setDisplayRect
+  // usa coordenadas de tela, não do documento). Reporta de novo sempre que
+  // o layout pode ter mudado.
+  useEffect(() => {
+    if (!nativeMode) return;
+    function reportarRect() {
+      const el = nativeAreaRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      tz.api.setRect(Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height));
+    }
+    reportarRect();
+    window.addEventListener("resize", reportarRect);
+    document.addEventListener("fullscreenchange", reportarRect);
+    return () => {
+      window.removeEventListener("resize", reportarRect);
+      document.removeEventListener("fullscreenchange", reportarRect);
+    };
+  }, [nativeMode, tz.api]);
+
+  // Espelha o estado do AVPlay (que chega por postMessage, ver
+  // tizen-player-bridge.ts) nos MESMOS estados do React que o ramo <video>
+  // já alimenta via onTimeUpdate/onProgress/onPlay/onEnded/onError — assim
+  // TODO o JSX abaixo (barra de progresso, spinner, tela de erro...)
+  // continua funcionando sem saber qual dos dois motores está tocando.
+  useEffect(() => {
+    if (!nativeMode) return;
+    const s = tz.state;
+    // Espelhamento de propósito: este efeito existe só pra sincronizar
+    // estado que chega de FORA (postMessage da casca Tizen) — é exatamente
+    // o caso de uso que a regra abaixo permite desativar.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDuration(s.duration);
+    setCurrentTime(s.currentTime);
+    setPlaying(!s.paused);
+    setBufferedEnd(s.bufferedTime);
+    setLoading(s.buffering);
+    if (s.duration > 0) setHasPlayedOnce(true);
+    if (s.error && !playbackError) {
+      setPlaybackErrorDetail({ code: undefined, message: s.error });
+      setPlaybackError(true);
+      setLoading(false);
+    }
+    if (s.ended && !ended) handleEnded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nativeMode, tz.state]);
+
   // salva progresso periodicamente enquanto toca, e ao sair/trocar de título
   useEffect(() => {
     const interval = setInterval(() => {
@@ -357,6 +462,18 @@ export function VideoPlayer({
   }, [saveProgress, titleId, episodeId]);
 
   function togglePlay() {
+    if (nativeMode) {
+      const estavaPausado = tzStateRef.current.paused;
+      if (estavaPausado) {
+        tz.api.play();
+        setPlaying(true);
+        showOverlay();
+      } else {
+        tz.api.pause();
+        setPlaying(false);
+      }
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) v.play().catch(() => {});
@@ -364,6 +481,14 @@ export function VideoPlayer({
   }
 
   function seekBy(delta: number) {
+    if (nativeMode) {
+      const max = tzStateRef.current.duration || Infinity;
+      const next = Math.min(Math.max(0, tzStateRef.current.currentTime + delta), max);
+      tz.api.seekTo(next);
+      setCurrentTime(next);
+      showOverlay();
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
     const max = v.duration || Infinity;
@@ -376,6 +501,14 @@ export function VideoPlayer({
   }
 
   function seekToPct(pct: number) {
+    if (nativeMode) {
+      const duration = tzStateRef.current.duration;
+      if (!duration) return;
+      const next = Math.min(Math.max(0, pct), 1) * duration;
+      tz.api.seekTo(next);
+      setCurrentTime(next);
+      return;
+    }
     const v = videoRef.current;
     if (!v || !v.duration) return;
     const next = Math.min(Math.max(0, pct), 1) * v.duration;
@@ -504,6 +637,15 @@ export function VideoPlayer({
   }
 
   function toggleMute() {
+    // AVPlay não expõe volume por instância (é sempre o volume do sistema,
+    // controlado pelo controle remoto físico) — em modo nativo o botão só
+    // atualiza o desenho na tela, sem efeito real no áudio. Mesma limitação
+    // de plataforma do comentário abaixo pro iOS Safari, só que aqui não
+    // tem nem um jeito alternativo de mudar volume programaticamente.
+    if (nativeMode) {
+      setMuted((m) => !m);
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
     v.muted = !v.muted;
@@ -511,9 +653,15 @@ export function VideoPlayer({
   }
 
   function handleVolumeChange(e: ChangeEvent<HTMLInputElement>) {
+    const value = parseFloat(e.target.value);
+    if (nativeMode) {
+      // Ver toggleMute: fica só visual em modo nativo.
+      setVolume(value);
+      setMuted(value === 0);
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
-    const value = parseFloat(e.target.value);
     // iOS Safari ignora volume via JS (só o usuário controla pelos botões
     // físicos) — o slider fica visível mas sem efeito lá, é limitação da
     // plataforma, não bug nosso.
@@ -525,43 +673,46 @@ export function VideoPlayer({
   }
 
   function handleRateChange(e: ChangeEvent<HTMLSelectElement>) {
+    const next = parseFloat(e.target.value);
+    if (nativeMode) {
+      tz.api.setSpeed(next);
+      setRate(next);
+      return;
+    }
     const v = videoRef.current;
     if (!v) return;
-    const next = parseFloat(e.target.value);
     v.playbackRate = next;
     setRate(next);
   }
 
   function toggleFullscreen() {
-    const v = videoRef.current as WebkitVideoElement | null;
-    if (!v) return;
-
-    // Prioridade invertida de propósito: tenta SEMPRE a Fullscreen API
-    // padrão primeiro (no container, não no <video>), e só cai pro
-    // webkitEnterFullscreen do <video> quando o padrão nem existe.
-    //
-    // A versão anterior fazia o oposto — checava webkitEnterFullscreen
-    // primeiro — pensando só em iOS Safari (que de fato não implementa
-    // Fullscreen API padrão em elemento genérico nenhum, só o <video> tem
-    // essa API própria da Apple). O problema: o WebKit antigo de TVs
-    // Tizen TAMBÉM expõe webkitEnterFullscreen no <video>, então o app
-    // pegava esse caminho lá também — e nesse modo o NAVEGADOR assume um
-    // player nativo próprio por cima do vídeo, com os controles dele, não
-    // os nossos. Foi assim que sumiram os botões ±10s, a barra de
-    // progresso e (o que interessa pro diagnóstico) o overlay de debug:
-    // webkitEnterFullscreen troca pra uma camada de renderização separada
-    // que cobre a página inteira, então nada do nosso DOM aparece mais
-    // por cima. Checando requestFullscreen no container primeiro, a TV
-    // (que TEM a API padrão, só também tem a antiga) fica com os nossos
-    // próprios controles — e o iOS, que não tem requestFullscreen em
-    // elemento genérico, cai pro webkitEnterFullscreen do jeito de sempre.
-    const container = v.closest(".player-shell");
-    if (container instanceof HTMLElement && typeof container.requestFullscreen === "function") {
+    // shellRef, não videoRef.closest(...): em modo nativo não existe
+    // <video> nenhum, então precisa de um jeito de achar o container que
+    // não dependa dele — e funciona idêntico pro <video> normal, já que é
+    // o mesmo nó (.player-shell) que v.closest(".player-shell") sempre
+    // encontrava.
+    const container = shellRef.current;
+    if (container && typeof container.requestFullscreen === "function") {
       if (!document.fullscreenElement) container.requestFullscreen().catch(() => {});
       else document.exitFullscreen();
       return;
     }
 
+    // Só chega aqui em navegador sem Fullscreen API padrão (ex: iOS
+    // Safari) — modo nativo nunca ativa fora da casca Tizen, que tem a API
+    // padrão, então videoRef sempre existe neste ramo.
+    const v = videoRef.current as WebkitVideoElement | null;
+    if (!v) return;
+
+    // Chegou aqui = não tem Fullscreen API padrão no container (ex: iOS
+    // Safari, que só implementa fullscreen próprio no <video> mesmo — API
+    // da Apple, não a padrão). A TV Tizen tem a API padrão (tratada acima),
+    // então nunca cai neste ramo — é o que evita reproduzir o bug antigo:
+    // webkitEnterFullscreen troca pra uma camada de renderização separada
+    // que cobre a página inteira, com os controles NATIVOS do navegador em
+    // vez dos nossos (sumiam os botões ±10s, a barra de progresso, o
+    // overlay de debug — nada do nosso DOM aparece mais por cima naquele
+    // modo).
     if (v.webkitEnterFullscreen) {
       if (v.webkitDisplayingFullscreen) v.webkitExitFullscreen?.();
       else v.webkitEnterFullscreen();
@@ -711,7 +862,8 @@ export function VideoPlayer({
 
   return (
     <div
-      className={`player-shell${overlayHidden ? " controls-hidden" : ""}`}
+      ref={shellRef}
+      className={`player-shell${overlayHidden ? " controls-hidden" : ""}${nativeMode ? " native-player" : ""}`}
       onMouseMove={showOverlay}
       onClick={handleVideoAreaClick}
       onTouchEnd={handleTouchEnd}
@@ -728,74 +880,84 @@ export function VideoPlayer({
           funcionar: só funcionava na rara janela em que os controles já
           tinham sumido sozinhos). isControlTarget continua filtrando
           cliques que caem em cima de um botão/slider de verdade. */}
-      <video
-        ref={videoRef}
-        className="player-video"
-        src={src}
-        playsInline
-        muted={muted}
-        disablePictureInPicture
-        disableRemotePlayback
-        // Nunca focável: em webviews de TV há relatos de que um <video>
-        // com foco nativo pode capturar as teclas de seta do controle pra
-        // trick-play próprio ANTES de qualquer JS vê-las — o que bateria
-        // certo com "os botões ±10s não fazem nada na TV" continuando a
-        // funcionar em touch/web (onde essa disputa não existe). O foco no
-        // player sempre fica num elemento de controle (botão, barra de
-        // progresso — ver tv-nav.ts), nunca no vídeo em si, então isto não
-        // tira alcance de ninguém.
-        tabIndex={-1}
-        controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
-        onLoadedMetadata={handleLoadedMetadata}
-        onTimeUpdate={(e) => {
-          if (exitingRef.current) return;
-          setCurrentTime(e.currentTarget.currentTime);
-        }}
-        onProgress={handleProgress}
-        onPlay={() => {
-          setPlaying(true);
-          showOverlay();
-        }}
-        onPause={() => {
-          // Saindo: o "pause" da desmontagem não pode mexer em estado nem
-          // no contexto de perfis — é isso que atropelava a navegação.
-          if (exitingRef.current) return;
-          setPlaying(false);
-          // O navegador dispara "pause" nativamente ao remover o <video> do
-          // DOM — bem no meio de uma troca de rota (ex: "voltar" com o vídeo
-          // tocando). doSaveProgress já adia a parte que importa (ver sua
-          // definição) — é por isso que chamar direto aqui é seguro.
-          doSaveProgress();
-        }}
-        onEnded={handleEnded}
-        onWaiting={() => setLoading(true)}
-        onCanPlay={() => setLoading(false)}
-        onPlaying={() => {
-          setLoading(false);
-          setHasPlayedOnce(true);
-        }}
-        onError={(e) => {
-          // navegador não conseguiu decodificar/abrir o arquivo (contêiner
-          // não suportado, arquivo corrompido, MAS TAMBÉM uma resposta de
-          // erro HTTP no lugar dos bytes do vídeo — ex: um 403/429/500 do
-          // nosso próprio servidor) — para de girar o spinner pra sempre e
-          // avisa em vez de travar. Guarda o MediaError de verdade (ver
-          // playbackErrorDetail) pra não esconder qual dessas causas foi.
-          //
-          // Durante a saída (ver handleExit) a gente solta a mídia de
-          // propósito, o que faz alguns navegadores dispararem "error" de
-          // src vazio — isso não é falha nenhuma, e mostrar a tela de erro
-          // por uma fração de segundo bem na hora de sair seria só ruído.
-          if (exitingRef.current) return;
-          const mediaError = e.currentTarget.error;
-          setPlaybackErrorDetail({
-            code: mediaError?.code,
-            message: mediaError?.message || "sem detalhes",
-          });
-          setLoading(false);
-          setPlaybackError(true);
-        }}
-      />
+      {nativeMode ? (
+        // Sem <video> nenhum aqui de propósito: o vídeo de verdade é
+        // desenhado pelo AVPlay da casca Tizen, NUM PLANO ATRÁS desta
+        // página inteira (ver tizen-player-bridge.ts e tizen/index.html) —
+        // esta div só reserva o espaço/tamanho (pra reportar o retângulo de
+        // tela certo) e fica transparente (.native-player no CSS) pra não
+        // tapar esse plano.
+        <div ref={nativeAreaRef} className="player-video player-video-native" />
+      ) : tz.active === false ? (
+        <video
+          ref={videoRef}
+          className="player-video"
+          src={src}
+          playsInline
+          muted={muted}
+          disablePictureInPicture
+          disableRemotePlayback
+          // Nunca focável: em webviews de TV há relatos de que um <video>
+          // com foco nativo pode capturar as teclas de seta do controle pra
+          // trick-play próprio ANTES de qualquer JS vê-las — o que bateria
+          // certo com "os botões ±10s não fazem nada na TV" continuando a
+          // funcionar em touch/web (onde essa disputa não existe). O foco no
+          // player sempre fica num elemento de controle (botão, barra de
+          // progresso — ver tv-nav.ts), nunca no vídeo em si, então isto não
+          // tira alcance de ninguém.
+          tabIndex={-1}
+          controlsList="nodownload noremoteplayback nofullscreen noplaybackrate"
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={(e) => {
+            if (exitingRef.current) return;
+            setCurrentTime(e.currentTarget.currentTime);
+          }}
+          onProgress={handleProgress}
+          onPlay={() => {
+            setPlaying(true);
+            showOverlay();
+          }}
+          onPause={() => {
+            // Saindo: o "pause" da desmontagem não pode mexer em estado nem
+            // no contexto de perfis — é isso que atropelava a navegação.
+            if (exitingRef.current) return;
+            setPlaying(false);
+            // O navegador dispara "pause" nativamente ao remover o <video> do
+            // DOM — bem no meio de uma troca de rota (ex: "voltar" com o vídeo
+            // tocando). doSaveProgress já adia a parte que importa (ver sua
+            // definição) — é por isso que chamar direto aqui é seguro.
+            doSaveProgress();
+          }}
+          onEnded={handleEnded}
+          onWaiting={() => setLoading(true)}
+          onCanPlay={() => setLoading(false)}
+          onPlaying={() => {
+            setLoading(false);
+            setHasPlayedOnce(true);
+          }}
+          onError={(e) => {
+            // navegador não conseguiu decodificar/abrir o arquivo (contêiner
+            // não suportado, arquivo corrompido, MAS TAMBÉM uma resposta de
+            // erro HTTP no lugar dos bytes do vídeo — ex: um 403/429/500 do
+            // nosso próprio servidor) — para de girar o spinner pra sempre e
+            // avisa em vez de travar. Guarda o MediaError de verdade (ver
+            // playbackErrorDetail) pra não esconder qual dessas causas foi.
+            //
+            // Durante a saída (ver handleExit) a gente solta a mídia de
+            // propósito, o que faz alguns navegadores dispararem "error" de
+            // src vazio — isso não é falha nenhuma, e mostrar a tela de erro
+            // por uma fração de segundo bem na hora de sair seria só ruído.
+            if (exitingRef.current) return;
+            const mediaError = e.currentTarget.error;
+            setPlaybackErrorDetail({
+              code: mediaError?.code,
+              message: mediaError?.message || "sem detalhes",
+            });
+            setLoading(false);
+            setPlaybackError(true);
+          }}
+        />
+      ) : null /* tz.active ainda null: handshake com a casca em andamento — mesma tela de carregamento de sempre, sem <video> nem área nativa até decidir */}
 
       {/* Independente de .player-overlay/controls-hidden de propósito — o
           feedback do seek tem que aparecer mesmo se os controles já

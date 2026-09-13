@@ -24,6 +24,16 @@
     text-align: center; padding: 0 80px;
   }
   #splash small { font-size: 24px; color: #8c8c8c; }
+
+  /* Ligado pelo próprio Flow (dentro do iframe) enquanto o AVPlay está
+     tocando — ver bloco "Ponte pro AVPlay" abaixo. O vídeo de verdade é
+     desenhado pela TV NUM PLANO DE HARDWARE ATRÁS desta página inteira,
+     então tudo que pintar algo opaco por cima dele (esta casca E o
+     documento do Flow dentro do iframe, cada um por conta própria)
+     simplesmente tampa o vídeo, sem erro nenhum. */
+  html.avplay-ativo, body.avplay-ativo, body.avplay-ativo #flow {
+    background: transparent;
+  }
 </style>
 </head>
 <body>
@@ -83,6 +93,199 @@
   // Se o PC estiver desligado o iframe não dispara "load" — depois de 15s
   // tira o splash pra pelo menos aparecer o erro da própria TV.
   setTimeout(function () { splash.style.display = "none"; }, 15000);
+
+  // ------------------------------------------------------------------
+  // Ponte pro AVPlay (ver src/lib/tizen-player-bridge.ts no repo do Flow)
+  // ------------------------------------------------------------------
+  // O <video> HTML5 desta TV tem um bug confirmado: sabe que o arquivo é
+  // buscável o inteiro (seekable cobre tudo) mas nunca chega a pedir os
+  // bytes de um trecho ainda não baixado quando o usuário busca — só volta
+  // pro ponto anterior, tanto num ±10s quanto na retomada de "continuar
+  // assistindo". AVPlay (webapis.avplay) é o motor de vídeo NATIVO da
+  // própria Samsung — o mesmo que apps como Netflix usam nessas TVs — e
+  // contorna esse bug por completo, porque fala direto com o pipeline de
+  // mídia do aparelho em vez de passar pelo WebKit.
+  //
+  // webapis só existe no documento de TOPO do widget empacotado (aqui) —
+  // NUNCA dentro do iframe, que é conteúdo de outra origem
+  // (http://ip-do-pc:3000). Por isso o vídeo em si abre e toca AQUI; o
+  // Flow, rodando dentro do iframe, só manda comandos (abrir, tocar,
+  // pausar, buscar, redimensionar) e recebe de volta o estado (tempo,
+  // duração, buffering...) por postMessage — nunca toca em webapis
+  // diretamente. Sem privilege nenhuma extra no config.xml: desde os
+  // modelos de 2015 a Samsung não exige mais isso pra apps web.
+  var AVPLAY_CANAL = "flow-tizen-avplay";
+  var avplayAberto = false;
+  var ultimoRect = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+  var estadoAtual = criarEstadoInicial();
+  var estadoTimer = null;
+
+  function criarEstadoInicial() {
+    return {
+      currentTime: 0, duration: 0, paused: true, buffering: false,
+      bufferedTime: 0, seeking: false, ended: false, error: null
+    };
+  }
+
+  function mandarParaFlow(msg) {
+    msg.channel = AVPLAY_CANAL;
+    try { frame.contentWindow.postMessage(msg, "*"); } catch (e) {}
+  }
+
+  function pararEnvioDeEstado() {
+    if (estadoTimer) { clearInterval(estadoTimer); estadoTimer = null; }
+  }
+
+  function agendarEnvioDeEstado() {
+    pararEnvioDeEstado();
+    // 4x/s: fluido o bastante pra barra de progresso/tempo sem inundar o
+    // postMessage — oncurrentplaytime do AVPlay dispara bem mais rápido.
+    estadoTimer = setInterval(function () {
+      mandarParaFlow({
+        type: "state",
+        currentTime: estadoAtual.currentTime,
+        duration: estadoAtual.duration,
+        paused: estadoAtual.paused,
+        buffering: estadoAtual.buffering,
+        bufferedTime: estadoAtual.bufferedTime,
+        seeking: estadoAtual.seeking,
+        ended: estadoAtual.ended,
+        error: estadoAtual.error
+      });
+    }, 250);
+  }
+
+  function fecharAvplay() {
+    pararEnvioDeEstado();
+    if (avplayAberto) {
+      try { webapis.avplay.stop(); } catch (e) {}
+      try { webapis.avplay.close(); } catch (e) {}
+    }
+    avplayAberto = false;
+    estadoAtual = criarEstadoInicial();
+    document.documentElement.classList.remove("avplay-ativo");
+    document.body.classList.remove("avplay-ativo");
+  }
+
+  function abrirAvplay(url, startTimeSegundos) {
+    fecharAvplay();
+    document.documentElement.classList.add("avplay-ativo");
+    document.body.classList.add("avplay-ativo");
+    try {
+      webapis.avplay.open(url);
+      webapis.avplay.setDisplayMethod("PLAYER_DISPLAY_MODE_LETTER_BOX");
+      webapis.avplay.setDisplayRect(ultimoRect.x, ultimoRect.y, ultimoRect.width, ultimoRect.height);
+      webapis.avplay.setListener({
+        onbufferingstart: function () { estadoAtual.buffering = true; },
+        onbufferingprogress: function (percent) {
+          estadoAtual.buffering = true;
+          if (estadoAtual.duration) estadoAtual.bufferedTime = (estadoAtual.duration * percent) / 100;
+        },
+        onbufferingcomplete: function () { estadoAtual.buffering = false; },
+        oncurrentplaytime: function (ms) {
+          estadoAtual.currentTime = ms / 1000;
+        },
+        onstreamcompleted: function () {
+          estadoAtual.ended = true;
+          estadoAtual.paused = true;
+          try { webapis.avplay.stop(); } catch (e) {}
+        },
+        onerror: function (err) { estadoAtual.error = String(err); },
+        onevent: function () {},
+        onsubtitlechange: function () {},
+        ondrmevent: function () {}
+      });
+
+      avplayAberto = true;
+      webapis.avplay.prepareAsync(
+        function () {
+          estadoAtual.duration = webapis.avplay.getDuration() / 1000;
+
+          function comecarReproducao() {
+            try { webapis.avplay.play(); } catch (e) {}
+            estadoAtual.paused = false;
+            estadoAtual.seeking = false;
+            agendarEnvioDeEstado();
+          }
+
+          // Mesma lógica de retomada do <video> normal (ver
+          // handleLoadedMetadata em VideoPlayer.tsx): busca antes de
+          // tocar, com uma reconferência caso pouse longe do pedido, e um
+          // teto de tempo pra nunca travar esperando pra sempre.
+          var duracaoMs = webapis.avplay.getDuration();
+          var alvoMs = Math.round(startTimeSegundos * 1000);
+          if (startTimeSegundos > 1 && alvoMs < duracaoMs - 2000) {
+            estadoAtual.seeking = true;
+            var tentouDeNovo = false;
+            var comecou = false;
+            var desistiu = setTimeout(function () {
+              if (!comecou) { comecou = true; comecarReproducao(); }
+            }, 3000);
+
+            function aposSeek() {
+              if (comecou) return;
+              var atualMs = webapis.avplay.getCurrentTime();
+              if (Math.abs(atualMs - alvoMs) > 5000 && !tentouDeNovo) {
+                tentouDeNovo = true;
+                webapis.avplay.seekTo(alvoMs, aposSeek, aposSeek);
+                return;
+              }
+              comecou = true;
+              clearTimeout(desistiu);
+              comecarReproducao();
+            }
+            webapis.avplay.seekTo(alvoMs, aposSeek, aposSeek);
+          } else {
+            comecarReproducao();
+          }
+        },
+        function (err) {
+          estadoAtual.error = "Falha ao preparar o vídeo: " + err;
+          agendarEnvioDeEstado();
+        }
+      );
+    } catch (e) {
+      estadoAtual.error = "AVPlay indisponível: " + e;
+      agendarEnvioDeEstado();
+    }
+  }
+
+  window.addEventListener("message", function (e) {
+    var data = e.data;
+    if (!data || data.channel !== AVPLAY_CANAL) return;
+    switch (data.type) {
+      case "ready":
+        mandarParaFlow({ type: "ack" });
+        break;
+      case "open":
+        abrirAvplay(data.url, data.startTime || 0);
+        break;
+      case "play":
+        if (avplayAberto) { try { webapis.avplay.play(); estadoAtual.paused = false; } catch (e2) {} }
+        break;
+      case "pause":
+        if (avplayAberto) { try { webapis.avplay.pause(); estadoAtual.paused = true; } catch (e2) {} }
+        break;
+      case "seek":
+        if (avplayAberto) {
+          estadoAtual.seeking = true;
+          try { webapis.avplay.seekTo(Math.round(data.time * 1000)); } catch (e2) {}
+        }
+        break;
+      case "rect":
+        ultimoRect = { x: data.x, y: data.y, width: data.width, height: data.height };
+        if (avplayAberto) {
+          try { webapis.avplay.setDisplayRect(data.x, data.y, data.width, data.height); } catch (e2) {}
+        }
+        break;
+      case "speed":
+        if (avplayAberto) { try { webapis.avplay.setSpeed(data.value); } catch (e2) {} }
+        break;
+      case "close":
+        fecharAvplay();
+        break;
+    }
+  });
 
   frame.src = URL_FLOW;
 })();

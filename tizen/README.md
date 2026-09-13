@@ -68,13 +68,52 @@ só nunca fez efeito nenhum.)
 
 Depois de instalado, o app fica na TV: Home → Apps → final da lista.
 
+## Player nativo (AVPlay) — corrige a busca (±10s / continuar assistindo)
+
+O `<video>` HTML5 desta TV tem um bug confirmado: ele sabe que o arquivo é
+buscável o inteiro (`seekable` cobre tudo), mas nunca chega a pedir os bytes
+de um trecho ainda não baixado quando o usuário busca — só volta pro ponto
+anterior, tanto num ±10s quanto na retomada de "continuar assistindo".
+
+Por isso o `index.html` desta casca também abre e controla o vídeo pelo
+**AVPlay** (`webapis.avplay`) — o motor de vídeo nativo da própria Samsung,
+o mesmo que apps como Netflix usam nessas TVs. Ele fala direto com o
+pipeline de mídia do aparelho, contornando esse bug do WebKit por completo.
+
+Não precisa de nenhuma privilege nova no `config.xml`: desde os modelos de
+2015 a Samsung não exige mais isso pra apps web usarem AVPlay.
+
+Como funciona, resumido: `webapis` só existe no documento de TOPO do widget
+(esta casca) — nunca dentro do iframe, que é conteúdo de outra origem. O
+Flow, rodando no iframe, detecta a casca sozinho (um handshake por
+`postMessage` ao montar o player) e, se ela responder, manda comandos
+(abrir/tocar/pausar/buscar/redimensionar) em vez de usar um `<video>` — a
+casca é quem de fato chama `webapis.avplay` e devolve o estado (tempo,
+duração, buffering...) do mesmo jeito. Em qualquer lugar que não seja esta
+casca (PC, celular, navegador web, ou uma versão antiga do `.wgt` sem esse
+bloco), o handshake nunca é respondido e o Flow cai de volta pro `<video>`
+normal sozinho — nada muda fora da TV.
+
+**Limitação conhecida:** AVPlay não expõe volume por instância (é sempre o
+volume do sistema, controlado pelo controle remoto físico) — os botões de
+volume/mudo do Flow continuam na tela, mas não têm efeito real no áudio
+quando o player nativo está ativo. Não é um bug, é a API mesmo.
+
+Como o vídeo do AVPlay é desenhado NUM PLANO DE HARDWARE atrás da página
+inteira (não dentro do DOM), tanto esta casca quanto o app dentro do
+iframe ficam com o fundo transparente enquanto ele toca — sem isso, a cor
+de fundo normal do site tampa o vídeo por completo, sem erro nenhum.
+
 ## Atualizando
 
-Mudança no Flow **não** exige reinstalar nada — a casca só aponta pra URL,
-então um redeploy no self-host já aparece ao reabrir o app.
+Mudança no Flow (o app dentro do iframe) **não** exige reinstalar nada — a
+casca só aponta pra URL, então um redeploy no self-host já aparece ao
+reabrir o app.
 
 Só precisa gerar e instalar o `.wgt` de novo se mexer no `config.xml`, no
-ícone, ou no `URL_FLOW`.
+ícone, no `URL_FLOW`, **ou no `index.html`** (é o caso da ponte AVPlay
+acima — se você já tinha o app instalado antes dela existir, precisa
+reinstalar o `.wgt` uma vez pra ganhar o `index.html` novo).
 
 ## Se o IP do PC mudar
 
