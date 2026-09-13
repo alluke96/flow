@@ -186,7 +186,7 @@
   // próprio overlay de debug do app, que a versão da CASCA instalada na TV
   // é de fato a que você acabou de reinstalar (em vez de confiar só em "eu
   // reinstalei"). Muda este texto sempre que mexer neste arquivo.
-  var CASCA_VERSAO = "avplay-7";
+  var CASCA_VERSAO = "avplay-8";
 
   var AVPLAY_CANAL = "flow-tizen-avplay";
   var avplayAberto = false;
@@ -352,8 +352,44 @@
         break;
       case "seek":
         if (avplayAberto) {
+          // BUG encontrado (relatado na TV real: ±10s "ignora" o clique e o
+          // vídeo só continua tocando de onde estava, e "continuar
+          // assistindo" sempre volta do zero): este seekTo não recebia
+          // callback nenhum, então `seeking` ficava travado em `true` pra
+          // sempre a partir do PRIMEIRO ±10s da sessão — nunca mais virava
+          // `false`. Duas consequências, ambas batendo com o relato:
+          //   1. doSaveProgress (ver useProgressPersistence) se recusa a
+          //      salvar progresso enquanto `seeking` é true — travado assim,
+          //      NENHUM progresso depois do primeiro seek chega a ser salvo
+          //      pelo resto daquela sessão (nem o save periódico de 5s, nem
+          //      o save final ao sair) — próxima abertura do episódio
+          //      resume de bem antes daquele primeiro ±10s, quase sempre
+          //      perto do início.
+          //   2. Se webapis.avplay.seekTo por acaso lançar (estado inválido
+          //      do AVPlay nesse instante, por exemplo) o catch abaixo
+          //      engolia o erro em silêncio — sem log nenhum, não dava pra
+          //      saber se a busca em si estava falhando ou só o rastreio
+          //      de `seeking` que estava quebrado.
+          // Agora sempre reseta `seeking` (sucesso, erro OU exceção) e loga
+          // qualquer falha real via o mesmo canal de log que já manda pro
+          // flow.log do servidor — próxima reprodução na TV real mostra se
+          // o seekTo em si está falhando (e com que erro) ou se já resolve
+          // o problema sozinho.
           estadoAtual.seeking = true;
-          try { webapis.avplay.seekTo(Math.round(data.time * 1000)); } catch (e2) {}
+          var alvoSeekMs = Math.round(data.time * 1000);
+          try {
+            webapis.avplay.seekTo(
+              alvoSeekMs,
+              function () { estadoAtual.seeking = false; },
+              function (err) {
+                estadoAtual.seeking = false;
+                log("ERRO no seekTo(", alvoSeekMs, "):", String(err));
+              }
+            );
+          } catch (e2) {
+            estadoAtual.seeking = false;
+            log("EXCEÇÃO ao chamar seekTo(", alvoSeekMs, "):", String(e2));
+          }
         }
         break;
       case "rect":
