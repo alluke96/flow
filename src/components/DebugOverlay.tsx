@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isDebugEnabled, EVENTO_MUDANCA } from "@/lib/debug-log";
+import { useTizenPlayer } from "@/lib/tizen-player-bridge";
 
 interface LogEntry {
   id: number;
@@ -101,6 +102,16 @@ export function DebugOverlay() {
   const t0Ref = useRef(0);
   const videoWireadoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Instância PRÓPRIA do bridge, independente da que o VideoPlayer usa —
+  // só pra responder, com dado real, a única pergunta que importa quando o
+  // player nativo não muda nada na prática: o handshake com a casca Tizen
+  // sequer está sendo confirmado (active=true), ou ele resolve pra false
+  // (ex: .wgt antigo sem o bloco AVPlay em tizen/index.html, ou nem está
+  // rodando dentro do app instalado)? Chamar de novo aqui é seguro — a
+  // casca responde "ack" pra qualquer "ready" que chegar, não é amarrado a
+  // uma instância específica de player.
+  const tzDebug = useTizenPlayer();
+
   useEffect(() => {
     const sync = () => setOn(isDebugEnabled());
     sync();
@@ -184,6 +195,14 @@ export function DebugOverlay() {
     >
       <div style={{ color: "#fff", marginBottom: 4 }}>
         DEBUG — toque 5x na versão pra desligar
+      </div>
+      <div style={{ color: tzDebug.active ? "#3ddc4a" : "#ff6b6b", marginBottom: 6 }}>
+        AVPlay:{" "}
+        {tzDebug.active === null
+          ? "detectando…"
+          : tzDebug.active
+            ? `ATIVO (t=${tzDebug.state.currentTime.toFixed(1)}/${tzDebug.state.duration.toFixed(1)} paused=${tzDebug.state.paused} buffering=${tzDebug.state.buffering} seeking=${tzDebug.state.seeking}${tzDebug.state.error ? ` erro=${tzDebug.state.error}` : ""})`
+            : "inativo — usando <video> normal"}
       </div>
       {videoInfo && (
         <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all", whiteSpace: "pre-line" }}>
