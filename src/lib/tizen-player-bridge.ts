@@ -61,6 +61,26 @@ declare global {
   }
 }
 
+/**
+ * Manda uma linha pro log do servidor (ver /api/tizen-debug, que a escreve
+ * no flow.log). Dentro do widget não existe console alcançável — a TV não
+ * expõe DevTools e `sdb dlog` não devolve nada nela —, então isto é a única
+ * forma de uma falha silenciosa aqui dentro deixar rastro.
+ *
+ * `new Image()` em vez de fetch: dispara o GET e não liga pra resposta, sem
+ * depender de CORS nem de nada mais estar funcionando.
+ */
+function logarServidor(mensagem: string): void {
+  try {
+    const servidor = process.env.NEXT_PUBLIC_FLOW_SERVER ?? "";
+    const img = new Image();
+    img.src = `${servidor}/api/tizen-debug?msg=${encodeURIComponent("[avplay] " + mensagem)}`;
+  } catch {
+    // sem rede/sem servidor: não há mais nada a fazer, e o log nunca pode
+    // ser o motivo de uma falha nova
+  }
+}
+
 function pegarAvplay(): AVPlay | null {
   if (typeof window === "undefined") return null;
   return window.webapis?.avplay ?? null;
@@ -310,13 +330,33 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       seekTo(time) {
         const avplay = pegarAvplay();
         if (!avplay || !abertoRef.current) return;
+        // `seeking` PRECISA voltar pra false em todos os caminhos —
+        // sucesso, erro e exceção. Travado em true, doSaveProgress (ver
+        // useProgressPersistence, ramo nativo) se recusa a salvar
+        // progresso, e aí nenhum save da sessão inteira acontece depois do
+        // primeiro ±10s: nem o periódico de 5s, nem o final ao sair. O
+        // efeito prático é "continuar assistindo" resumindo de bem antes
+        // do primeiro seek, quase sempre perto do início (pular a abertura
+        // costuma ser a primeira coisa que se faz). Foi exatamente esse o
+        // bug na versão anterior deste bridge, que passava só o callback de
+        // sucesso.
         estadoRef.current.seeking = true;
-        try {
-          avplay.seekTo(Math.round(time * 1000), () => {
-            estadoRef.current.seeking = false;
-          });
-        } catch {
+        const pronto = () => {
           estadoRef.current.seeking = false;
+        };
+        try {
+          avplay.seekTo(Math.round(time * 1000), pronto, (erro) => {
+            pronto();
+            // Falha de busca não é falha de reprodução: o vídeo segue
+            // tocando de onde estava, então NÃO vira `error` (que jogaria
+            // a tela de "não foi possível reproduzir" por cima de um vídeo
+            // que está tocando). Registra no log do servidor, que é a
+            // única janela pra dentro do widget.
+            logarServidor(`seekTo(${Math.round(time * 1000)}ms) falhou: ${String(erro)}`);
+          });
+        } catch (e) {
+          pronto();
+          logarServidor(`seekTo lançou: ${String(e)}`);
         }
       },
       setRect(x, y, width, height) {
