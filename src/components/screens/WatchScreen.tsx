@@ -28,6 +28,11 @@ function PlayerLoading() {
 
 type EpisodeWithSeason = EpisodeSummary & { seasonNumero: number };
 
+/** Duração do catálogo (em minutos) em segundos — reserva, não precisão. */
+function emSegundos(minutos: number | undefined): number | undefined {
+  return minutos ? minutos * 60 : undefined;
+}
+
 function flattenEpisodes(title: TitleDetail): EpisodeWithSeason[] {
   return title.temporadas?.flatMap((s) => s.episodios.map((e) => ({ ...e, seasonNumero: s.numero }))) ?? [];
 }
@@ -127,7 +132,12 @@ function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null })
       setResolved({
         episodeId: null,
         initialTime: progress?.progressoSegundos ?? 0,
-        duracaoConhecida: progress?.duracaoSegundos,
+        // O catálogo entra como reserva pro progresso antigo, salvo antes de
+        // a duração passar a ser gravada: sem NENHUM valor aqui, um vídeo
+        // entregue já cortado (app de TV) abriria sem duração nenhuma, e
+        // "sem duração" é lido como "ainda não carregou" — a barra ficaria
+        // vazia e o progresso pararia de ser salvo.
+        duracaoConhecida: progress?.duracaoSegundos ?? emSegundos(title.duracaoMinutos),
       });
       return;
     }
@@ -143,10 +153,11 @@ function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null })
     }
     const progress = getProgressRef.current(title.id);
     const doEpisodio = progress && progress.episodioId === epId ? progress : null;
+    const episodio = allEpisodes.find((e) => e.id === epId);
     setResolved({
       episodeId: epId,
       initialTime: doEpisodio?.progressoSegundos ?? 0,
-      duracaoConhecida: doEpisodio?.duracaoSegundos,
+      duracaoConhecida: doEpisodio?.duracaoSegundos ?? emSegundos(episodio?.duracaoMinutos),
     });
     // getProgress vem por ref de propósito (ver comentário acima) — é por
     // isso que não entra aqui: refs não recriam o efeito ao mudar.

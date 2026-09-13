@@ -147,29 +147,40 @@ export function NavEstadoProvider({
 }) {
   const [telaAtual, setTelaAtual] = useState<Tela>(inicial);
   const pilhaRef = useRef<Tela[]>([]);
+  // Espelho da tela atual pra ler FORA do atualizador de estado — ver o
+  // porquê logo abaixo, em `ir`.
+  const telaAtualRef = useRef<Tela>(inicial);
 
   const ir = useCallback<NavContexto["ir"]>((tela, opts) => {
-    setTelaAtual((atual) => {
-      if (opts?.substituir) return tela;
+    // A pilha é mexida AQUI, e não lá dentro do setTelaAtual, por uma razão
+    // que custou caro: o React pode chamar o atualizador de estado mais de
+    // uma vez pro mesmo update (é por isso que ele precisa ser uma função
+    // pura). Empilhando lá dentro, uma única navegação entrava DUAS vezes
+    // na pilha, e aí o Return do controle gastava um toque sem sair do
+    // lugar — de fora parecia que ele ficava alternando entre duas telas em
+    // vez de voltar.
+    if (!opts?.substituir) {
       // Ir pra tela de onde acabamos de vir é VOLTAR, não avançar — e a
       // maior parte do app navega assim: sair do player cai no detalhe do
       // título, o botão de voltar do detalhe cai no browse. Empilhando
-      // esses, o botão Return do controle ficaria pingando entre as duas
-      // telas pra sempre, sem nunca chegar no começo.
+      // esses, o Return percorreria ida e volta pra sempre, sem nunca
+      // chegar no começo.
       const anterior = pilhaRef.current[pilhaRef.current.length - 1];
-      if (anterior && hrefDeTela(anterior) === hrefDeTela(tela)) {
-        pilhaRef.current.pop();
-        return tela;
-      }
-      pilhaRef.current.push(atual);
-      return tela;
-    });
+      if (anterior && hrefDeTela(anterior) === hrefDeTela(tela)) pilhaRef.current.pop();
+      else pilhaRef.current.push(telaAtualRef.current);
+    }
+    telaAtualRef.current = tela;
+    setTelaAtual(tela);
   }, []);
 
   const voltar = useCallback(() => {
     const anterior = pilhaRef.current.pop();
-    if (anterior) setTelaAtual(anterior);
-    else sairDoApp();
+    if (!anterior) {
+      sairDoApp();
+      return;
+    }
+    telaAtualRef.current = anterior;
+    setTelaAtual(anterior);
   }, []);
 
   useEffect(() => {
