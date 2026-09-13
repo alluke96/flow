@@ -115,6 +115,16 @@ Só precisa gerar e instalar o `.wgt` de novo se mexer no `config.xml`, no
 acima — se você já tinha o app instalado antes dela existir, precisa
 reinstalar o `.wgt` uma vez pra ganhar o `index.html` novo).
 
+**Como confirmar que uma reinstalação pegou de verdade**, sem depender só
+de "eu reinstalei": todo `index.html` novo deveria mudar a constante
+`CASCA_VERSAO` (perto do topo do bloco "Ponte pro AVPlay"). Ela viaja no
+handshake com o app e aparece no overlay de debug (5 toques na versão, na
+tela de perfis) como `AVPlay: ATIVO (casca=<versão>...)` — se o texto que
+aparece ali não bater com o que você acabou de colocar no arquivo, a
+reinstalação não pegou (cache do Tizen Studio, certificado errado, DUID
+errado etc.) e vale tentar de novo antes de investigar qualquer outra
+coisa.
+
 ## Se o IP do PC mudar
 
 O app abre no vazio. Reserve o IP no DHCP do roteador pra isso não

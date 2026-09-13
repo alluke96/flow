@@ -222,7 +222,7 @@ export function DebugOverlay() {
         {tzDebug.active === null
           ? "detectando…"
           : tzDebug.active
-            ? `ATIVO (t=${tzDebug.state.currentTime.toFixed(1)}/${tzDebug.state.duration.toFixed(1)} paused=${tzDebug.state.paused} buffering=${tzDebug.state.buffering} seeking=${tzDebug.state.seeking}${tzDebug.state.error ? ` erro=${tzDebug.state.error}` : ""})`
+            ? `ATIVO (casca=${tzDebug.shellVersion ?? "?"} t=${tzDebug.state.currentTime.toFixed(1)}/${tzDebug.state.duration.toFixed(1)} paused=${tzDebug.state.paused} buffering=${tzDebug.state.buffering} seeking=${tzDebug.state.seeking}${tzDebug.state.error ? ` erro=${tzDebug.state.error}` : ""})`
             : "inativo — usando <video> normal"}
       </div>
       <div style={{ color: "#8c8c8c", marginBottom: 6, wordBreak: "break-all" }}>

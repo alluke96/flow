@@ -73,6 +73,15 @@ interface UseTizenPlayerResult {
   active: boolean | null;
   state: TizenPlayerState;
   api: TizenPlayerApi;
+  /**
+   * A CASCA_VERSAO que a própria casca (tizen/index.html) mandou junto com
+   * o "ack" — null enquanto active não for true. Existe só pra diagnóstico
+   * (ver DebugOverlay): confirma que o .wgt instalado na TV É de fato a
+   * versão que você acabou de reinstalar, em vez de confiar só em "eu
+   * reinstalei" — o handshake mostra a versão de verdade, não a que você
+   * acha que devia estar lá.
+   */
+  shellVersion: string | null;
 }
 
 /**
@@ -83,6 +92,7 @@ interface UseTizenPlayerResult {
 export function useTizenPlayer(): UseTizenPlayerResult {
   const [active, setActive] = useState<boolean | null>(null);
   const [state, setState] = useState<TizenPlayerState>(ESTADO_INICIAL);
+  const [shellVersion, setShellVersion] = useState<string | null>(null);
 
   useEffect(() => {
     // Sem pai (não estamos dentro de um iframe) = com certeza não é a
@@ -108,6 +118,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
           resolvido = true;
           setActive(true);
         }
+        if (typeof data.cascaVersao === "string") setShellVersion(data.cascaVersao);
         return;
       }
 
@@ -166,5 +177,5 @@ export function useTizenPlayer(): UseTizenPlayerResult {
     [send]
   );
 
-  return { active, state, api };
+  return { active, state, api, shellVersion };
 }

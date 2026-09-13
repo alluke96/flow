@@ -114,6 +114,12 @@
   // duração, buffering...) por postMessage — nunca toca em webapis
   // diretamente. Sem privilege nenhuma extra no config.xml: desde os
   // modelos de 2015 a Samsung não exige mais isso pra apps web.
+  // Mandado de volta em todo "ack" (ver abaixo) — dá pra confirmar, pelo
+  // próprio overlay de debug do app, que a versão da CASCA instalada na TV
+  // é de fato a que você acabou de reinstalar (em vez de confiar só em "eu
+  // reinstalei"). Muda este texto sempre que mexer neste arquivo.
+  var CASCA_VERSAO = "avplay-2";
+
   var AVPLAY_CANAL = "flow-tizen-avplay";
   var avplayAberto = false;
   var ultimoRect = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
@@ -255,7 +261,7 @@
     if (!data || data.channel !== AVPLAY_CANAL) return;
     switch (data.type) {
       case "ready":
-        mandarParaFlow({ type: "ack" });
+        mandarParaFlow({ type: "ack", cascaVersao: CASCA_VERSAO });
         break;
       case "open":
         abrirAvplay(data.url, data.startTime || 0);
