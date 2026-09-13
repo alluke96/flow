@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type SVGProps } from "react";
-import { useRouter } from "next/navigation";
+import { useNav } from "@/lib/nav";
 import { useProfiles } from "@/context/profile-context";
 import { avatarSrc } from "@/lib/avatars";
 import { refreshCatalog } from "@/lib/api-client";
@@ -59,11 +59,11 @@ export function ProfileScreen() {
     }
   }
   const [refreshState, setRefreshState] = useState<RefreshState>("idle");
-  const router = useRouter();
+  const { ir } = useNav();
 
   function enter(id: string) {
     selectProfile(id);
-    router.push("/browse");
+    ir({ nome: "browse" });
   }
 
   function handleAvatarClick(p: Profile) {

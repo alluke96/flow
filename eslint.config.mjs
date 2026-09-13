@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Saída do build do app de TV: é código gerado (o export estático do
+    // próprio Flow), não fonte — ver scripts/build-tizen.mjs.
+    ".next-tizen/**",
+    "tizen/app/**",
   ]),
 ]);
 

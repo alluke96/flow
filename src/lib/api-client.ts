@@ -1,6 +1,29 @@
 import type { CatalogResponse, TitleDetail } from "@/types/catalog";
 
 /**
+ * Endereço do servidor do Flow, embutido no build.
+ *
+ * Só tem efeito no app de TV: lá o app roda empacotado dentro do `.wgt`, a
+ * partir de `file://`, onde "mesma origem" não existe — um fetch("/api/...")
+ * viraria `file:///api/...` e não acharia nada. Todo caminho precisa virar
+ * absoluto pro IP do PC (ver scripts/build-tizen.mjs, que passa este valor
+ * no build).
+ *
+ * Na web (PC, celular, navegador) isto fica vazio de propósito: os caminhos
+ * continuam relativos, mesma origem, sem CORS nenhum no meio.
+ */
+const SERVIDOR = process.env.NEXT_PUBLIC_FLOW_SERVER ?? "";
+
+export function apiUrl(caminho: string): string {
+  if (typeof window !== "undefined" && window.location.protocol === "file:") {
+    return SERVIDOR + caminho;
+  }
+  return caminho;
+}
+
+const api = apiUrl;
+
+/**
  * Helpers de chamada às rotas internas /api/*. O frontend nunca fala
  * diretamente com o Google Drive nem recebe credenciais — só bate nestes
  * endpoints (ver spec, seção 6/7).
@@ -25,7 +48,7 @@ export function getCachedTitle(id: string): TitleDetail | undefined {
 }
 
 export async function fetchCatalog(): Promise<CatalogResponse> {
-  const res = await fetch("/api/catalog");
+  const res = await fetch(api("/api/catalog"));
   if (!res.ok) throw new Error("Falha ao carregar catálogo");
   const data: CatalogResponse = await res.json();
   catalogCache = data;
@@ -39,7 +62,7 @@ export async function fetchCatalog(): Promise<CatalogResponse> {
  * pode ter ganhado episódios/ficado disponível desde a última busca.
  */
 export async function refreshCatalog(): Promise<CatalogResponse> {
-  const res = await fetch("/api/catalog", { method: "POST" });
+  const res = await fetch(api("/api/catalog"), { method: "POST" });
   if (!res.ok) throw new Error("Falha ao atualizar catálogo");
   const data: CatalogResponse = await res.json();
   catalogCache = data;
@@ -48,7 +71,7 @@ export async function refreshCatalog(): Promise<CatalogResponse> {
 }
 
 export async function fetchTitle(id: string): Promise<TitleDetail | null> {
-  const res = await fetch(`/api/title/${encodeURIComponent(id)}`);
+  const res = await fetch(api(`/api/title/${encodeURIComponent(id)}`));
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("Falha ao carregar título");
   const data: TitleDetail = await res.json();
@@ -57,18 +80,18 @@ export async function fetchTitle(id: string): Promise<TitleDetail | null> {
 }
 
 export function posterUrl(id: string): string {
-  return `/api/image/${encodeURIComponent(id)}/poster`;
+  return api(`/api/image/${encodeURIComponent(id)}/poster`);
 }
 
 export function bannerUrl(id: string): string {
-  return `/api/image/${encodeURIComponent(id)}/banner`;
+  return api(`/api/image/${encodeURIComponent(id)}/banner`);
 }
 
 export function seasonImageUrl(id: string, seasonNumero: number): string {
-  return `/api/image/${encodeURIComponent(id)}/season/${seasonNumero}`;
+  return api(`/api/image/${encodeURIComponent(id)}/season/${seasonNumero}`);
 }
 
 export function streamUrl(id: string, episodeId?: string | null): string {
-  const base = `/api/stream/${encodeURIComponent(id)}`;
+  const base = api(`/api/stream/${encodeURIComponent(id)}`);
   return episodeId ? `${base}?ep=${encodeURIComponent(episodeId)}` : base;
 }

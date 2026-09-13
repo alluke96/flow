@@ -103,35 +103,11 @@ export function DebugOverlay() {
   const videoWireadoRef = useRef<HTMLVideoElement | null>(null);
 
   // Instância PRÓPRIA do bridge, independente da que o VideoPlayer usa —
-  // só pra responder, com dado real, a única pergunta que importa quando o
-  // player nativo não muda nada na prática: o handshake com a casca Tizen
-  // sequer está sendo confirmado (active=true), ou ele resolve pra false
-  // (ex: .wgt antigo sem o bloco AVPlay em tizen/index.html, ou nem está
-  // rodando dentro do app instalado)? Chamar de novo aqui é seguro — a
-  // casca responde "ack" pra qualquer "ready" que chegar, não é amarrado a
-  // uma instância específica de player.
+  // responde, com dado real, se o player NATIVO da TV está mesmo em uso
+  // (AVPlay) ou se caiu pro <video> normal. Chamar de novo aqui é seguro:
+  // detectar é só olhar se o objeto `webapis` existe, não tem efeito
+  // colateral nenhum.
   const tzDebug = useTizenPlayer();
-  // Diagnóstico cru, SEM filtrar por canal — pra separar duas causas bem
-  // diferentes de "AVPlay inativo": a casca nunca manda mensagem NENHUMA
-  // (postMessage quebrado nessa direção nesta TV) vs manda mensagem mas com
-  // um formato que useTizenPlayer não reconhece (bug no formato/canal). Se
-  // isto aqui continuar em 0 mesmo com a casca já reinstalada, o problema é
-  // no postMessage em si, não no código do bridge.
-  const [msgCount, setMsgCount] = useState(0);
-  const [lastMsg, setLastMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    function onAnyMessage(e: MessageEvent) {
-      setMsgCount((n) => n + 1);
-      try {
-        setLastMsg(JSON.stringify(e.data).slice(0, 200));
-      } catch {
-        setLastMsg(String(e.data).slice(0, 200));
-      }
-    }
-    window.addEventListener("message", onAnyMessage);
-    return () => window.removeEventListener("message", onAnyMessage);
-  }, []);
 
   useEffect(() => {
     const sync = () => setOn(isDebugEnabled());
@@ -224,10 +200,6 @@ export function DebugOverlay() {
           : tzDebug.active
             ? `ATIVO (casca=${tzDebug.shellVersion ?? "?"} t=${tzDebug.state.currentTime.toFixed(1)}/${tzDebug.state.duration.toFixed(1)} paused=${tzDebug.state.paused} buffering=${tzDebug.state.buffering} seeking=${tzDebug.state.seeking}${tzDebug.state.error ? ` erro=${tzDebug.state.error}` : ""})`
             : "inativo — usando <video> normal"}
-      </div>
-      <div style={{ color: "#8c8c8c", marginBottom: 6, wordBreak: "break-all" }}>
-        postMessage recebidos: {msgCount}
-        {lastMsg && <><br />último: {lastMsg}</>}
       </div>
       {videoInfo && (
         <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all", whiteSpace: "pre-line" }}>

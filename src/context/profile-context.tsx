@@ -16,6 +16,7 @@ import { mergeProfiles } from "@/lib/profile-merge";
 import { DEFAULT_AVATAR_ID, isValidAvatarId } from "@/lib/avatars";
 import { sanitizeProfileName } from "@/lib/validation";
 import { useTVNav } from "@/lib/tv-nav";
+import { apiUrl } from "@/lib/api-client";
 
 /**
  * Perfis locais (sem login), com sincronização entre aparelhos.
@@ -48,7 +49,7 @@ import { useTVNav } from "@/lib/tv-nav";
  */
 
 const STORAGE_KEY = "flow_profiles_v1";
-const SYNC_URL = "/api/profiles/sync";
+const SYNC_URL = apiUrl("/api/profiles/sync");
 
 function emptyStore(): ProfileStore {
   return { perfis: [], perfilAtivoId: null };
@@ -206,7 +207,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     // (tela "Quem está assistindo?"): nada tocando, nenhuma navegação em
     // andamento.
     let cancelado = false;
-    fetch("/api/profiles", { cache: "no-store" })
+    fetch(apiUrl("/api/profiles"), { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { perfis?: unknown; excluidos?: unknown } | null) => {
         if (cancelado || !data || !Array.isArray(data.perfis)) return;
@@ -326,7 +327,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       // nunca lê "ausente" como "apagado" (senão outro aparelho
       // desatualizado ressuscitaria o perfil). Também é manda-e-esquece —
       // sem `.then` que mexa em estado.
-      void fetch(`/api/profiles/${encodeURIComponent(id)}`, {
+      void fetch(apiUrl(`/api/profiles/${encodeURIComponent(id)}`), {
         method: "DELETE",
         keepalive: true,
       }).catch(() => {});

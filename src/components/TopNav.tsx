@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNav } from "@/lib/nav";
 import { useProfiles } from "@/context/profile-context";
 import { avatarSrc } from "@/lib/avatars";
 
@@ -13,7 +12,7 @@ interface TopNavProps {
 
 export function TopNav({ search, onSearchChange }: TopNavProps) {
   const { activeProfile, exitProfile } = useProfiles();
-  const router = useRouter();
+  const { ir, href } = useNav();
   const [solid, setSolid] = useState(false);
 
   // Header fica transparente sobre o banner até rolar um pouco a página —
@@ -29,14 +28,21 @@ export function TopNav({ search, onSearchChange }: TopNavProps) {
 
   function switchProfile() {
     exitProfile();
-    router.push("/");
+    ir({ nome: "perfis" });
   }
 
   return (
     <nav className={`topnav${solid ? " solid" : ""}`}>
-      <Link href="/browse" className="brand">
+      <a
+        href={href({ nome: "browse" })}
+        className="brand"
+        onClick={(e) => {
+          e.preventDefault();
+          ir({ nome: "browse" });
+        }}
+      >
         flow
-      </Link>
+      </a>
       <div className="nav-right">
         <input
           className="search-input"

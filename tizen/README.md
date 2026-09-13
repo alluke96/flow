@@ -1,153 +1,131 @@
 # App de TV (Samsung / Tizen)
 
-Casca que abre o Flow numa TV Samsung. Não tem lógica de produto nenhuma:
-carrega `http://<ip-do-pc>:3000` num `<iframe>` em tela cheia.
+O Flow empacotado como app nativo de TV. O app **inteiro** vai dentro do
+`.wgt` e roda a partir de `file://` na própria TV; o PC continua sendo só o
+servidor de dados e vídeo (as rotas `/api/*`).
 
-## Por que iframe e não um redirect
+## Por que assim (e não um iframe apontando pro PC)
 
-A versão óbvia — `location.replace("http://ip:3000")` no `index.html` —
-funciona, mas a TV sai do contexto do app e passa a tratar a página como
-conteúdo de navegador. Duas consequências ruins:
+A montagem anterior era uma casca que carregava `http://<ip-do-pc>:3000`
+num `<iframe>` em tela cheia. Funcionava pra assistir, mas tinha um teto
+que não dava pra furar: **`webapis` — a API nativa da Samsung, incluindo o
+player `avplay` — só existe no documento de TOPO de um widget empacotado.**
+Dentro do iframe, que é conteúdo de outra origem, ela simplesmente não
+existe.
 
-1. Liga o **ponteiro do Smart Remote** (o cursor que anda de pixel em pixel)
-   e ele engole as setas: o `tv-nav` nunca recebe um `ArrowDown`.
-2. As configurações do `config.xml` (tecla Return, orientação, etc.) deixam
-   de valer sobre a página.
+Isso importa porque o `<video>` HTML5 dessa TV tem um bug confirmado: ele
+sabe que o arquivo é buscável o inteiro (`seekable` cobre tudo) mas nunca
+chega a pedir os bytes de um trecho ainda não baixado quando o usuário
+busca — só volta pro ponto anterior. É por isso que ±10s e "continuar
+assistindo" não funcionavam na TV, e só nela. O AVPlay contorna isso
+porque fala direto com o pipeline de mídia do aparelho.
 
-Dentro do iframe o documento de cima continua sendo o app Tizen, então o
-controle segue em modo D-pad e as teclas chegam no Flow normalmente.
+A tentativa de ponte (o app no iframe mandando comandos por `postMessage`
+pra casca, que chamaria o AVPlay) nunca entregou uma mensagem sequer nessa
+TV. Junto disso, o iframe carregado também desenhava por cima de qualquer
+elemento irmão da casca, ignorando `z-index` e até o próprio tamanho em
+CSS — o que inviabilizava até depurar o problema. Com o app dentro do
+widget, as duas coisas deixam de existir: não há fronteira pra atravessar,
+e `webapis.avplay` está disponível direto no código do player (ver
+`src/lib/tizen-player-bridge.ts`).
 
-Isso exige que o servidor permita ser enquadrado: o CSP em `src/proxy.ts`
-manda `frame-ancestors 'self' file:` (a casca vive em `file://` na TV) e
-não manda mais `X-Frame-Options`.
+## Gerando o conteúdo do app
 
-## Desligando o cursor do Smart Remote
+No PC, dentro do repositório:
 
-Se o controle ainda aparecer como ponteiro (cursor andando de pixel em
-pixel) em vez de foco pulando de elemento em elemento, falta um atributo no
-`<tizen:setting>` do SEU `config.xml`:
-
-```xml
-<tizen:setting ... pointing-device-support="disable"/>
+```powershell
+npm run build:tizen -- http://192.168.15.7:3000
 ```
 
-Em TVs 2015-2020 o padrão é "enable" (por isso o cursor aparece sem essa
-linha); em 2021+ já vem desligado por padrão. Documentado em
-[Configuring Web Applications](https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html).
-Muda `config.xml` → precisa reinstalar o `.wgt` (ver "Atualizando" abaixo).
+O endereço é o do **PC que roda o self-host** — é pra ele que o app
+instalado vai pedir catálogo, imagens, perfis e vídeo. Ele fica embutido no
+build: se o IP do PC mudar, precisa gerar e reinstalar de novo (vale
+reservar o IP no DHCP do roteador pra isso não acontecer).
 
-(Se você tem uma linha `<tizen:metadata key=".../use.pointer.mode" .../>`
-de uma sugestão anterior nossa: pode apagar. Não é uma metadata real —
-`tizen:metadata` aceita qualquer chave sem validar, então nunca deu erro,
-só nunca fez efeito nenhum.)
+O resultado sai em **`tizen/app/`**. Esse é o conteúdo do projeto do Tizen
+Studio: `index.html` na raiz, junto com `_next/`, `avatars/` e os ícones.
+
+O script cuida sozinho das partes que um export estático não suporta
+(rotas de API, o proxy, e as rotas dinâmicas `/title/[id]` e `/watch/[id]`)
+— ver `scripts/build-tizen.mjs`. Nada disso sai do lugar de verdade: ele
+devolve tudo no fim, inclusive se o build falhar no meio.
 
 ## Instalando
 
 1. Tizen Studio → File → New → Tizen Project → Template → TV → Web
-   Application → Basic Project
-2. Copie **apenas o `index.html`** daqui por cima do gerado. O `config.xml`
-   do template já funciona como está — o `config.xml` daqui é referência,
-   não é pra copiar: declarar privilege de internet, `<access>` ou features
-   de tela que o perfil `tv-samsung` não conhece faz o validador recusar o
-   projeto e o launch nem começa. A única linha que vale adicionar ao SEU
-   `config.xml` é o `pointing-device-support="disable"` acima.
-3. Ajuste `URL_FLOW` no topo do `index.html` pro IP do PC.
-4. Copie o `icon.png` daqui pra raiz do projeto (512x423, que é o tamanho
-   que a Samsung usa na fileira de apps). Tem também `icon-512.png`, a
-   versão quadrada, pra onde for pedido 1:1.
-
-   Os dois são o wordmark do site: Space Grotesk 700, `letter-spacing`
-   -0.04em, `#f5f5f7` sobre `#0a0a0b` — os mesmos valores de `.brand` em
-   `globals.css` e dos tokens `--text`/`--bg`. Foram renderizados no
-   Chromium a partir do arquivo de fonte que o `next/font` gera no build,
-   então batem com a marca da web, não são uma aproximação.
-5. Certificado: Certificate Manager → `+` → **Samsung** → **TV** (precisa da
-   extensão "Samsung Certificate Extension" no Package Manager, e da TV
+   Application → Basic Project.
+2. Copie **todo o conteúdo de `tizen/app/`** pra pasta do projeto,
+   substituindo o `index.html` gerado pelo template. Mantenha o
+   `config.xml` do template e o `icon.png` (ver abaixo).
+3. Certificado: Certificate Manager → `+` → **Samsung** → **TV** (precisa
+   da extensão "Samsung Certificate Extension" no Package Manager, e da TV
    conectada via `sdb`, porque o certificado é amarrado ao DUID dela).
-6. Botão direito no projeto → Run As → Tizen Web Application.
+4. Botão direito no projeto → Run As → Tizen Web Application.
 
-Depois de instalado, o app fica na TV: Home → Apps → final da lista.
+Pra conectar a TV: Developer Mode ligado nela (Apps → segurar o ícone do
+Smart Hub → Developer mode → On → IP do **PC**), e no PC:
 
-## Player nativo (AVPlay) — corrige a busca (±10s / continuar assistindo)
+```powershell
+cd C:\tizen-studio\tools
+.\sdb connect <ip-da-tv>
+.\sdb devices
+```
 
-O `<video>` HTML5 desta TV tem um bug confirmado: ele sabe que o arquivo é
-buscável o inteiro (`seekable` cobre tudo), mas nunca chega a pedir os bytes
-de um trecho ainda não baixado quando o usuário busca — só volta pro ponto
-anterior, tanto num ±10s quanto na retomada de "continuar assistindo".
+### config.xml
 
-Por isso o `index.html` desta casca também abre e controla o vídeo pelo
-**AVPlay** (`webapis.avplay`) — o motor de vídeo nativo da própria Samsung,
-o mesmo que apps como Netflix usam nessas TVs. Ele fala direto com o
-pipeline de mídia do aparelho, contornando esse bug do WebKit por completo.
+O `config.xml` do template já funciona. As duas linhas que valem a pena
+conferir no `<tizen:setting>`:
 
-Não precisa de nenhuma privilege nova no `config.xml`: desde os modelos de
-2015 a Samsung não exige mais isso pra apps web usarem AVPlay.
+- `hwkey-event="enable"` — faz o botão Return físico chegar como keydown
+  (keyCode 10009), que o player já trata pra sair.
+- `pointing-device-support="disable"` — desliga o cursor do Smart Remote,
+  deixando o controle em modo D-pad (foco pulando de elemento em elemento).
+  Em TVs 2015-2020 o padrão é "enable", por isso o cursor aparece sem essa
+  linha; em 2021+ já vem desligado. Documentado em
+  [Configuring Web Applications](https://developer.samsung.com/smarttv/develop/guides/fundamentals/configuring-tv-applications.html).
 
-Como funciona, resumido: `webapis` só existe no documento de TOPO do widget
-(esta casca) — nunca dentro do iframe, que é conteúdo de outra origem. O
-Flow, rodando no iframe, detecta a casca sozinho (um handshake por
-`postMessage` ao montar o player) e, se ela responder, manda comandos
-(abrir/tocar/pausar/buscar/redimensionar) em vez de usar um `<video>` — a
-casca é quem de fato chama `webapis.avplay` e devolve o estado (tempo,
-duração, buffering...) do mesmo jeito. Em qualquer lugar que não seja esta
-casca (PC, celular, navegador web, ou uma versão antiga do `.wgt` sem esse
-bloco), o handshake nunca é respondido e o Flow cai de volta pro `<video>`
-normal sozinho — nada muda fora da TV.
+Não declare privilege de internet nem `<access>`: o perfil `tv-samsung`
+recusa o projeto e o launch nem começa. O AVPlay também não precisa de
+privilege — desde os modelos de 2015 a Samsung não exige mais isso.
 
-**Limitação conhecida:** AVPlay não expõe volume por instância (é sempre o
-volume do sistema, controlado pelo controle remoto físico) — os botões de
-volume/mudo do Flow continuam na tela, mas não têm efeito real no áudio
-quando o player nativo está ativo. Não é um bug, é a API mesmo.
+### Ícone
 
-Como o vídeo do AVPlay é desenhado NUM PLANO DE HARDWARE atrás da página
-inteira (não dentro do DOM), tanto esta casca quanto o app dentro do
-iframe ficam com o fundo transparente enquanto ele toca — sem isso, a cor
-de fundo normal do site tampa o vídeo por completo, sem erro nenhum.
-
-**Depurando a casca sem DevTools:** nesta TV nem `sdb dlog`/`dlogutil`
-devolvem nada (bloqueado mesmo com Developer Mode ligado — parece comum em
-TV de varejo/produção), nem um log desenhado na própria tela é confiável
-(o `<iframe>` do Flow, uma vez com conteúdo carregado, desenha por cima de
-QUALQUER elemento irmão nesta TV, ignorando `z-index` e até o próprio
-tamanho declarado em CSS — bug de navegador antigo, não específico desta
-TV, sem contorno via CSS).
-
-O que funciona: a casca manda cada log que geraria pro próprio servidor do
-Flow via `GET /api/tizen-debug?msg=...` (não lê a resposta, só dispara —
-não depende de CORS, tela, `sdb` nem `postMessage` nenhum). Esses logs
-caem direto no `flow.log` de sempre, prefixados com `[tizen-debug]` —
-mesmo lugar onde já dá pra ver os logs de streaming (ver
-`src/lib/log.ts`/`stream-utils.ts` no repo). Enquanto testa a casca, deixe
-um `Get-Content C:\flow-secrets\flow.log -Wait -Tail 50 | Select-String
-tizen-debug` (PowerShell) rodando.
-
-O overlay de debug do próprio app (5 toques na versão) mostra o lado de
-DENTRO do iframe — juntando os dois (flow.log pro lado da casca, overlay
-pro lado do app) dá pra ver a troca de mensagens dos dois lados ao mesmo
-tempo.
+Use o `tizen/icon.png` (512x423, o tamanho que a Samsung usa na fileira de
+apps). Tem também `icon-512.png`, quadrado, pra onde for pedido 1:1. Os
+dois são o wordmark do site, renderizados a partir do mesmo arquivo de
+fonte que o `next/font` gera no build — batem com a marca da web, não são
+aproximação.
 
 ## Atualizando
 
-Mudança no Flow (o app dentro do iframe) **não** exige reinstalar nada — a
-casca só aponta pra URL, então um redeploy no self-host já aparece ao
-reabrir o app.
+Diferente da montagem antiga: agora **toda mudança no app exige gerar o
+`tizen/app/` de novo e reinstalar o `.wgt`**. Um redeploy do self-host
+sozinho só atualiza o servidor (API e vídeo), não o que está instalado na
+TV. Esse é o preço de ter o app dentro do widget — e o que compra o acesso
+ao player nativo.
 
-Só precisa gerar e instalar o `.wgt` de novo se mexer no `config.xml`, no
-ícone, no `URL_FLOW`, **ou no `index.html`** (é o caso da ponte AVPlay
-acima — se você já tinha o app instalado antes dela existir, precisa
-reinstalar o `.wgt` uma vez pra ganhar o `index.html` novo).
+## Depurando
 
-**Como confirmar que uma reinstalação pegou de verdade**, sem depender só
-de "eu reinstalei": todo `index.html` novo deveria mudar a constante
-`CASCA_VERSAO` (perto do topo do bloco "Ponte pro AVPlay"). Ela viaja no
-handshake com o app e aparece no overlay de debug (5 toques na versão, na
-tela de perfis) como `AVPlay: ATIVO (casca=<versão>...)` — se o texto que
-aparece ali não bater com o que você acabou de colocar no arquivo, a
-reinstalação não pegou (cache do Tizen Studio, certificado errado, DUID
-errado etc.) e vale tentar de novo antes de investigar qualquer outra
-coisa.
+Dentro do widget não há console alcançável: a TV não expõe DevTools e
+`sdb dlog`/`dlogutil` não devolvem nada nela (parece bloqueado de fábrica,
+mesmo com Developer Mode ligado). Duas saídas:
 
-## Se o IP do PC mudar
+- **Overlay na tela** — 5 toques no número da versão (tela de perfis) liga
+  um quadro de diagnóstico com os eventos de entrada, o estado do player e
+  se o AVPlay está mesmo ativo. Agora ele aparece normalmente: sem iframe,
+  nada desenha por cima dele.
+- **Log no servidor** — um `GET /api/tizen-debug?msg=...` cai no `flow.log`
+  do PC. Útil pra qualquer coisa que quebre antes da interface aparecer.
+  ```powershell
+  Get-Content C:\flow-secrets\flow.log -Wait -Tail 50 | Select-String tizen-debug
+  ```
 
-O app abre no vazio. Reserve o IP no DHCP do roteador pra isso não
-acontecer — é a única dependência frágil desta montagem.
+Pra conferir o modo de tela única sem instalar nada na TV, abra `/tv` no
+navegador — é exatamente o mesmo componente que vai empacotado.
+
+## Limitação conhecida
+
+AVPlay não expõe volume por instância (é sempre o volume do sistema,
+controlado pelo controle remoto físico) — os botões de volume/mudo do Flow
+continuam na tela, mas não têm efeito real no áudio quando o player nativo
+está ativo. É a API mesmo, não um bug.

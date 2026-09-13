@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useNav } from "@/lib/nav";
 import { useProfiles } from "@/context/profile-context";
 
 /**
@@ -12,11 +12,11 @@ import { useProfiles } from "@/context/profile-context";
  */
 export function RequireProfile({ children }: { children: ReactNode }) {
   const { ready, activeProfile } = useProfiles();
-  const router = useRouter();
+  const { ir } = useNav();
 
   useEffect(() => {
-    if (ready && !activeProfile) router.replace("/");
-  }, [ready, activeProfile, router]);
+    if (ready && !activeProfile) ir({ nome: "perfis" }, { substituir: true });
+  }, [ready, activeProfile, ir]);
 
   if (!ready || !activeProfile) {
     return (

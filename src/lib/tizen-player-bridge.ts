@@ -1,47 +1,85 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * Ponte pro player NATIVO da TV (webapis.avplay), usado só dentro da casca
- * Tizen (ver tizen/index.html).
+ * Player NATIVO da TV (webapis.avplay), usado quando o Flow roda dentro do
+ * app Tizen empacotado.
  *
- * Por quê: o <video> HTML5 desta TV tem um bug confirmado (ver comentário
- * em parseRangeHeader, stream-utils.ts) — ele sabe que o arquivo é buscável
- * o inteiro (seekable cobre tudo), mas nunca chega a pedir os bytes de um
- * trecho ainda não baixado quando o usuário busca; só volta pro ponto
- * anterior, tanto num ±10s quanto na retomada de "continuar assistindo".
- * AVPlay é o motor de vídeo NATIVO da própria Samsung (o mesmo que apps
- * como Netflix usam nessas TVs) — ele fala direto com o pipeline de mídia
- * do aparelho, contornando esse bug específico do WebKit.
+ * Por que existe: o <video> HTML5 desta TV tem um bug confirmado (ver o
+ * comentário em parseRangeHeader, stream-utils.ts) — ele sabe que o arquivo
+ * é buscável o inteiro (`seekable` cobre tudo), mas nunca chega a pedir os
+ * bytes de um trecho ainda não baixado quando o usuário busca; só volta pro
+ * ponto anterior, tanto num ±10s quanto na retomada de "continuar
+ * assistindo". AVPlay é o motor de vídeo nativo da própria Samsung (o mesmo
+ * que apps como Netflix usam nessas TVs): fala direto com o pipeline de
+ * mídia do aparelho, contornando esse bug do WebKit.
  *
- * webapis só existe no documento de TOPO do widget empacotado — nunca
- * dentro de um iframe de outra origem, que é exatamente onde o Flow roda
- * (http://ip-do-pc:3000 dentro do file:// da casca, ver tizen/index.html).
- * Por isso o vídeo em si é aberto e controlado LÁ, na casca; este módulo só
- * troca mensagens com ela via postMessage — abrir/tocar/pausar/buscar/
- * redimensionar de um lado, estado (tempo, duração, buffering...) do outro.
+ * `webapis` só existe no documento de TOPO de um widget empacotado. Por
+ * isso o app agora VAI DENTRO do .wgt (ver scripts/build-tizen.mjs) em vez
+ * de ser carregado num <iframe> a partir do PC: dentro do iframe esse
+ * objeto simplesmente não existe, e a ponte por postMessage que tentava
+ * contornar isso nunca entregou mensagem nenhuma nesta TV.
  *
- * Em qualquer lugar que não seja essa casca (PC, celular, navegador web,
- * ou até um Tizen mais antigo sem essa ponte), o handshake abaixo nunca
- * recebe resposta e o player cai de volta pro <video> normal sozinho —
- * este módulo nunca muda o comportamento de ninguém além da TV.
+ * Em qualquer outro lugar (PC, celular, navegador web, ou a TV abrindo o
+ * site pelo navegador) `webapis` não existe, `active` resolve pra false e o
+ * player usa o <video> normal — este módulo não muda nada fora do widget.
  */
 
-const CANAL = "flow-tizen-avplay";
-// Tempo máximo esperando a casca responder ao handshake antes de desistir e
-// usar o <video> normal. Troca de mensagem dentro do mesmo processo (mesmo
-// WebKit, duas janelas) é praticamente instantânea — esta margem é generosa
-// de propósito, só pra cobrir uma casca lenta pra terminar de carregar.
-const HANDSHAKE_TIMEOUT_MS = 1500;
-const HANDSHAKE_RETRY_MS = 200;
+/** Só o pedaço da API do AVPlay que este módulo usa. */
+interface AVPlayListener {
+  onbufferingstart?: () => void;
+  onbufferingprogress?: (percent: number) => void;
+  onbufferingcomplete?: () => void;
+  oncurrentplaytime?: (ms: number) => void;
+  onstreamcompleted?: () => void;
+  onerror?: (erro: string) => void;
+  onevent?: (tipo: string, dados: string) => void;
+  onsubtitlechange?: () => void;
+  ondrmevent?: () => void;
+}
+
+interface AVPlay {
+  open(url: string): void;
+  close(): void;
+  stop(): void;
+  prepareAsync(ok: () => void, erro: (e: unknown) => void): void;
+  play(): void;
+  pause(): void;
+  seekTo(ms: number, ok?: () => void, erro?: (e: unknown) => void): void;
+  setDisplayRect(x: number, y: number, largura: number, altura: number): void;
+  setDisplayMethod(metodo: string): void;
+  setListener(listener: AVPlayListener): void;
+  setSpeed(valor: number): void;
+  getDuration(): number;
+  getCurrentTime(): number;
+}
+
+declare global {
+  interface Window {
+    webapis?: { avplay?: AVPlay };
+  }
+}
+
+function pegarAvplay(): AVPlay | null {
+  if (typeof window === "undefined") return null;
+  return window.webapis?.avplay ?? null;
+}
+
+// Com que frequência o estado do AVPlay (que chega por callbacks, bem mais
+// rápido que isso) vira estado do React. 4x/s é fluido pra barra de
+// progresso/relógio sem re-renderizar o player à toa.
+const INTERVALO_ESTADO_MS = 250;
+// Teto pra esperar o seek de retomada antes de dar play assim mesmo — mesma
+// ideia (e mesmo valor) do caminho do <video>, ver RESUME_SEEK_TIMEOUT_MS.
+const TIMEOUT_SEEK_RETOMADA_MS = 3000;
 
 export interface TizenPlayerState {
   currentTime: number; // segundos
   duration: number; // segundos
   paused: boolean;
   buffering: boolean;
-  bufferedTime: number; // segundos, estimado a partir do progresso de buffer do AVPlay
+  bufferedTime: number; // segundos, estimado pelo progresso de buffer do AVPlay
   seeking: boolean;
   ended: boolean;
   error: string | null;
@@ -69,112 +107,246 @@ export interface TizenPlayerApi {
 }
 
 interface UseTizenPlayerResult {
-  /** null = ainda checando se existe a casca; true/false = resultado final. */
+  /** null = ainda checando (só até o primeiro efeito); true/false = final. */
   active: boolean | null;
   state: TizenPlayerState;
   api: TizenPlayerApi;
-  /**
-   * A CASCA_VERSAO que a própria casca (tizen/index.html) mandou junto com
-   * o "ack" — null enquanto active não for true. Existe só pra diagnóstico
-   * (ver DebugOverlay): confirma que o .wgt instalado na TV É de fato a
-   * versão que você acabou de reinstalar, em vez de confiar só em "eu
-   * reinstalei" — o handshake mostra a versão de verdade, não a que você
-   * acha que devia estar lá.
-   */
+  /** Versão do app empacotado — diagnóstico, ver DebugOverlay. */
   shellVersion: string | null;
 }
 
 /**
- * Detecta a casca Tizen e, se existir, dá acesso ao AVPlay dela. Chame uma
- * vez por instância de VideoPlayer — o handshake roda de novo a cada
- * montagem, mas é barato e rápido (ver HANDSHAKE_TIMEOUT_MS).
+ * Detecta o AVPlay e, se existir, dá o controle dele. Chame uma vez por
+ * instância de VideoPlayer.
  */
 export function useTizenPlayer(): UseTizenPlayerResult {
   const [active, setActive] = useState<boolean | null>(null);
   const [state, setState] = useState<TizenPlayerState>(ESTADO_INICIAL);
-  const [shellVersion, setShellVersion] = useState<string | null>(null);
+
+  // Espelho mutável: os callbacks do AVPlay disparam muito mais rápido que o
+  // ciclo de render, então eles escrevem aqui e um intervalo publica isso no
+  // estado do React (ver INTERVALO_ESTADO_MS).
+  const estadoRef = useRef<TizenPlayerState>({ ...ESTADO_INICIAL });
+  const abertoRef = useRef(false);
+  const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
-    // Sem pai (não estamos dentro de um iframe) = com certeza não é a
-    // casca Tizen. Resolve na hora, sem nem tentar o handshake — é o que
-    // garante que PC/celular/navegador web nunca esperam nada aqui.
-    if (typeof window === "undefined" || window.parent === window) {
-      // Resolução síncrona de propósito: não existe handshake nenhum pra
-      // esperar quando nem há um pai (não estamos num iframe) — é o caso
-      // de PC/celular/navegador web, a maioria de longe.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActive(false);
-      return;
-    }
+    // Sem detecção assíncrona nenhuma: ou o objeto nativo está aqui, ou não
+    // está. (A versão anterior deste módulo dependia de um handshake por
+    // postMessage com uma casca em iframe — que nesta TV nunca respondeu.)
+    //
+    // Fica num efeito, e não direto no corpo do componente, porque `webapis`
+    // só existe no navegador: decidir isso durante a renderização faria o
+    // HTML pré-gerado no build divergir do que o cliente monta (hydration
+    // mismatch). É sincronização com um sistema externo — o caso que a regra
+    // abaixo existe pra permitir.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActive(pegarAvplay() !== null);
+  }, []);
 
-    let resolvido = false;
+  // Publica o espelho no estado do React enquanto houver mídia aberta.
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => {
+      setState({ ...estadoRef.current });
+    }, INTERVALO_ESTADO_MS);
+    return () => clearInterval(t);
+  }, [active]);
 
-    function onMessage(e: MessageEvent) {
-      const data = e.data as { channel?: string; type?: string } & Record<string, unknown>;
-      if (!data || data.channel !== CANAL) return;
-
-      if (data.type === "ack") {
-        if (!resolvido) {
-          resolvido = true;
-          setActive(true);
-        }
-        if (typeof data.cascaVersao === "string") setShellVersion(data.cascaVersao);
-        return;
+  const fechar = useCallback(() => {
+    const avplay = pegarAvplay();
+    if (avplay && abertoRef.current) {
+      try {
+        avplay.stop();
+      } catch {
+        // já parado/nunca tocou — nada a fazer
       }
+      try {
+        avplay.close();
+      } catch {
+        // idem: fechar duas vezes não é erro que importe aqui
+      }
+    }
+    abertoRef.current = false;
+    estadoRef.current = { ...ESTADO_INICIAL };
+  }, []);
 
-      if (data.type === "state") {
-        setState({
-          currentTime: Number(data.currentTime) || 0,
-          duration: Number(data.duration) || 0,
-          paused: Boolean(data.paused),
-          buffering: Boolean(data.buffering),
-          bufferedTime: Number(data.bufferedTime) || 0,
-          seeking: Boolean(data.seeking),
-          ended: Boolean(data.ended),
-          error: typeof data.error === "string" ? data.error : null,
+  const abrir = useCallback(
+    (url: string, startTime: number) => {
+      const avplay = pegarAvplay();
+      if (!avplay) return;
+      fechar();
+
+      try {
+        avplay.open(url);
+        // LETTER_BOX preserva a proporção do vídeo dentro do retângulo (em
+        // vez de esticar pra preencher, que distorce em conteúdo que não
+        // seja exatamente 16:9).
+        avplay.setDisplayMethod("PLAYER_DISPLAY_MODE_LETTER_BOX");
+        const r = rectRef.current;
+        if (r) avplay.setDisplayRect(r.x, r.y, r.width, r.height);
+
+        avplay.setListener({
+          onbufferingstart: () => {
+            estadoRef.current.buffering = true;
+          },
+          onbufferingprogress: (percent) => {
+            estadoRef.current.buffering = true;
+            if (estadoRef.current.duration) {
+              estadoRef.current.bufferedTime = (estadoRef.current.duration * percent) / 100;
+            }
+          },
+          onbufferingcomplete: () => {
+            estadoRef.current.buffering = false;
+          },
+          oncurrentplaytime: (ms) => {
+            estadoRef.current.currentTime = ms / 1000;
+          },
+          onstreamcompleted: () => {
+            estadoRef.current.ended = true;
+            estadoRef.current.paused = true;
+            try {
+              avplay.stop();
+            } catch {
+              // fim normal da mídia — se já parou sozinho, tudo bem
+            }
+          },
+          onerror: (erro) => {
+            estadoRef.current.error = String(erro);
+          },
         });
+
+        abertoRef.current = true;
+
+        avplay.prepareAsync(
+          () => {
+            const duracaoMs = avplay.getDuration();
+            estadoRef.current.duration = duracaoMs / 1000;
+
+            function comecar() {
+              // Relê o objeto em vez de fechar sobre o `avplay` de fora:
+              // dentro de uma function declaration o TypeScript não mantém
+              // o estreitamento de tipo do null-check lá de cima.
+              const player = pegarAvplay();
+              if (!player) return;
+              try {
+                player.play();
+              } catch {
+                // se play() falhar aqui, o estado de erro do listener é
+                // quem vai contar a história — não adianta insistir
+              }
+              estadoRef.current.paused = false;
+              estadoRef.current.seeking = false;
+            }
+
+            // Retomada ("continuar assistindo"): busca ANTES de tocar, com
+            // uma reconferência se pousar longe do pedido, e um teto de
+            // tempo pra nunca ficar preso esperando um callback que pode
+            // não vir. Mesma lógica do caminho do <video> (ver
+            // useResumePlayback).
+            const alvoMs = Math.round(startTime * 1000);
+            if (startTime > 1 && alvoMs < duracaoMs - 2000) {
+              estadoRef.current.seeking = true;
+              let tentouDeNovo = false;
+              let comecou = false;
+              const desistir = setTimeout(() => {
+                if (!comecou) {
+                  comecou = true;
+                  comecar();
+                }
+              }, TIMEOUT_SEEK_RETOMADA_MS);
+
+              const aposSeek = () => {
+                if (comecou) return;
+                const atualMs = avplay.getCurrentTime();
+                if (Math.abs(atualMs - alvoMs) > 5000 && !tentouDeNovo) {
+                  tentouDeNovo = true;
+                  avplay.seekTo(alvoMs, aposSeek, aposSeek);
+                  return;
+                }
+                comecou = true;
+                clearTimeout(desistir);
+                comecar();
+              };
+              avplay.seekTo(alvoMs, aposSeek, aposSeek);
+            } else {
+              comecar();
+            }
+          },
+          (erro) => {
+            estadoRef.current.error = "Falha ao preparar o vídeo: " + String(erro);
+          }
+        );
+      } catch (e) {
+        estadoRef.current.error = "AVPlay falhou ao abrir: " + String(e);
       }
-    }
-    window.addEventListener("message", onMessage);
+    },
+    [fechar]
+  );
 
-    // A casca pode ainda não ter terminado de montar o listener dela quando
-    // este efeito roda — reenvia "ready" periodicamente até vir o "ack" em
-    // vez de confiar num único disparo no instante certo.
-    const retry = setInterval(() => {
-      window.parent.postMessage({ channel: CANAL, type: "ready" }, "*");
-    }, HANDSHAKE_RETRY_MS);
-    window.parent.postMessage({ channel: CANAL, type: "ready" }, "*");
-
-    const desistir = setTimeout(() => {
-      if (!resolvido) setActive(false);
-    }, HANDSHAKE_TIMEOUT_MS);
-
-    return () => {
-      window.removeEventListener("message", onMessage);
-      clearInterval(retry);
-      clearTimeout(desistir);
-    };
-  }, []);
-
-  const send = useCallback((msg: Record<string, unknown>) => {
-    if (typeof window === "undefined" || window.parent === window) return;
-    window.parent.postMessage({ channel: CANAL, ...msg }, "*");
-  }, []);
-
-  // useMemo (não useRef) pra api ficar disponível de forma estável sem
-  // acessar `.current` durante a renderização — só recria se `send` mudar,
-  // e `send` é estável (deps vazias) pela vida toda do componente.
   const api = useMemo<TizenPlayerApi>(
     () => ({
-      open: (url, startTime) => send({ type: "open", url, startTime }),
-      play: () => send({ type: "play" }),
-      pause: () => send({ type: "pause" }),
-      seekTo: (time) => send({ type: "seek", time }),
-      setRect: (x, y, width, height) => send({ type: "rect", x, y, width, height }),
-      setSpeed: (rate) => send({ type: "speed", value: rate }),
-      close: () => send({ type: "close" }),
+      open: abrir,
+      play() {
+        const avplay = pegarAvplay();
+        if (!avplay || !abertoRef.current) return;
+        try {
+          avplay.play();
+          estadoRef.current.paused = false;
+        } catch {
+          // estado inválido pra tocar (ex: mídia já fechada) — ignora
+        }
+      },
+      pause() {
+        const avplay = pegarAvplay();
+        if (!avplay || !abertoRef.current) return;
+        try {
+          avplay.pause();
+          estadoRef.current.paused = true;
+        } catch {
+          // idem
+        }
+      },
+      seekTo(time) {
+        const avplay = pegarAvplay();
+        if (!avplay || !abertoRef.current) return;
+        estadoRef.current.seeking = true;
+        try {
+          avplay.seekTo(Math.round(time * 1000), () => {
+            estadoRef.current.seeking = false;
+          });
+        } catch {
+          estadoRef.current.seeking = false;
+        }
+      },
+      setRect(x, y, width, height) {
+        rectRef.current = { x, y, width, height };
+        const avplay = pegarAvplay();
+        if (!avplay || !abertoRef.current) return;
+        try {
+          avplay.setDisplayRect(x, y, width, height);
+        } catch {
+          // rect inválido (ex: elemento ainda sem layout) — a próxima
+          // medida corrige
+        }
+      },
+      setSpeed(rate) {
+        const avplay = pegarAvplay();
+        if (!avplay || !abertoRef.current) return;
+        try {
+          avplay.setSpeed(rate);
+        } catch {
+          // nem todo conteúdo aceita trick play — segue em 1x
+        }
+      },
+      close: fechar,
     }),
-    [send]
+    [abrir, fechar]
+  );
+
+  const shellVersion = useMemo(
+    () => (process.env.NEXT_PUBLIC_FLOW_VERSAO ? `app ${process.env.NEXT_PUBLIC_FLOW_VERSAO}` : null),
+    []
   );
 
   return { active, state, api, shellVersion };

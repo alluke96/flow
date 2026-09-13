@@ -1,13 +1,14 @@
 {
   "name": "flow",
-  "version": "0.1.49",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "generate:assets": "node scripts/generate-avatars.mjs && node scripts/generate-mock-art.mjs"
+    "generate:assets": "node scripts/generate-avatars.mjs && node scripts/generate-mock-art.mjs",
+    "build:tizen": "node scripts/build-tizen.mjs"
   },
   "dependencies": {
     "googleapis": "^180.0.0",

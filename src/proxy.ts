@@ -50,20 +50,15 @@ function buildCsp(nonce: string): string {
     // por nonce, que é o que importa contra XSS.
     "style-src 'self' 'unsafe-inline'",
     "connect-src 'self'",
-    // O app de TV (Tizen/Samsung) é uma casca que carrega o Flow num
-    // <iframe> em tela cheia, e a página dessa casca vive em file:// dentro
-    // da própria TV — por isso `file:` precisa estar liberado aqui, senão o
-    // iframe não carrega e a TV mostra tela preta.
-    //
-    // Por que iframe e não um redirect simples: com `location.replace` a TV
-    // sai do contexto do app e passa a tratar o conteúdo como página de
-    // navegador, o que liga o ponteiro do Smart Remote (o cursor andando de
-    // pixel em pixel) e engole as setas do controle — o tv-nav nunca chega
-    // a ver um ArrowDown. Dentro do iframe o app continua sendo app.
-    //
-    // O que isso custa: quem conseguir carregar uma página file:// no
-    // aparelho consegue embutir o Flow. Num app de LAN doméstica, sem login
-    // e sem sessão pra roubar, é um risco pequeno.
+    // `file:` aqui é herança da montagem ANTIGA do app de TV, em que uma
+    // casca file:// carregava o Flow num <iframe> em tela cheia. Hoje o app
+    // vai empacotado dentro do .wgt (ver tizen/README.md) e não enquadra
+    // nada — quem ainda depende disto é só um widget da versão antiga que
+    // continue instalado numa TV, que sem isto mostraria tela preta em vez
+    // de uma pista do que houve. Pode sair assim que não houver mais
+    // nenhum por aí. O custo de manter é pequeno: permite que uma página
+    // file:// do próprio aparelho enquadre o Flow, num app de LAN
+    // doméstica, sem login nem sessão pra roubar.
     "frame-ancestors 'self' file:",
     "base-uri 'self'",
     "form-action 'self'",
@@ -89,6 +84,27 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=(), interest-cohort=()"
   );
+  return res;
+}
+
+/**
+ * Libera a leitura das respostas de /api/* pra origens que não são a do
+ * próprio servidor. Existe por causa do app de TV: ele roda de `file://`
+ * dentro do widget, então TODA chamada dele é cross-origin e, sem estes
+ * headers, o navegador da TV até faz a request mas proíbe o app de ler a
+ * resposta — catálogo vazio, perfis que não carregam, e nenhum erro óbvio
+ * dizendo o porquê.
+ *
+ * Ecoa a origem recebida em vez de "*" só pra manter `Vary: Origin`
+ * coerente em cache; sem cookie/sessão no app, os dois seriam equivalentes
+ * em permissividade.
+ */
+function corsApi(res: NextResponse, origin: string | null): NextResponse {
+  res.headers.set("Access-Control-Allow-Origin", origin ?? "*");
+  res.headers.set("Vary", "Origin");
+  res.headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS");
+  res.headers.set("Access-Control-Allow-Headers", "Content-Type");
+  res.headers.set("Access-Control-Max-Age", "86400");
   return res;
 }
 
@@ -123,10 +139,25 @@ export function proxy(req: NextRequest) {
     const host = req.headers.get("host");
     const expectedOrigin = host ? `${req.nextUrl.protocol}//${host}` : null;
     const isSafeMethod = req.method === "GET" || req.method === "HEAD";
-    if (!isSafeMethod && origin && expectedOrigin && origin !== expectedOrigin) {
+    // "null" é a origem que um documento file:// manda — é exatamente o
+    // caso do app de TV, que roda empacotado dentro do .wgt e fala com
+    // este servidor por IP (ver scripts/build-tizen.mjs e api-client.ts).
+    // Liberar isso aqui não afrouxa nada de verdade: como o comentário
+    // acima já explica, não existe login nem cookie de sessão neste app
+    // pra um CSRF roubar — a checagem é higiene, não fronteira.
+    const isWidgetTizen = origin === "null";
+    if (!isSafeMethod && origin && !isWidgetTizen && expectedOrigin && origin !== expectedOrigin) {
       const res = NextResponse.json({ error: "origem não permitida" }, { status: 403 });
       res.headers.set("Content-Security-Policy", csp);
-      return applySecurityHeaders(res);
+      return corsApi(applySecurityHeaders(res), origin);
+    }
+
+    // Preflight (OPTIONS): o navegador manda antes de um POST/PUT com
+    // Content-Type: application/json vindo de outra origem — sem responder
+    // isso, salvar perfil pelo app de TV nunca sai do lugar.
+    if (req.method === "OPTIONS") {
+      const res = new NextResponse(null, { status: 204 });
+      return corsApi(applySecurityHeaders(res), origin);
     }
 
     const cfg = matchRateLimit(pathname);
@@ -153,7 +184,7 @@ export function proxy(req: NextRequest) {
 
     const apiRes = NextResponse.next();
     apiRes.headers.set("Content-Security-Policy", csp);
-    return applySecurityHeaders(apiRes);
+    return corsApi(applySecurityHeaders(apiRes), origin);
   }
 
   // Páginas: propaga o nonce pro Next.js via header de request (é assim que

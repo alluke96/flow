@@ -16,5 +16,11 @@ export function isValidAvatarId(id: unknown): id is string {
 
 export function avatarSrc(id: string): string {
   const safe = isValidAvatarId(id) ? id : DEFAULT_AVATAR_ID;
-  return `/avatars/${safe}.svg`;
+  // No app de TV a página roda de `file://` e "/avatars/..." apontaria pra
+  // raiz do sistema de arquivos da TV — o avatar simplesmente não
+  // carregaria. Lá o app é uma página só, na raiz, então relativo sempre
+  // resolve certo; na web continua absoluto porque as rotas são aninhadas
+  // (/title/xyz), onde "./avatars" viraria "/title/avatars".
+  const base = typeof window !== "undefined" && window.location.protocol === "file:" ? "./" : "/";
+  return `${base}avatars/${safe}.svg`;
 }

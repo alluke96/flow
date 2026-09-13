@@ -1,4 +1,6 @@
-import Link from "next/link";
+"use client";
+
+import { useNav, type Tela } from "@/lib/nav";
 import type { TitleSummary } from "@/types/catalog";
 import { posterUrl } from "@/lib/api-client";
 
@@ -11,9 +13,23 @@ interface CardProps {
 }
 
 export function Card({ title, progressPct, resume }: CardProps) {
-  const href = resume ? `/watch/${title.id}` : `/title/${title.id}`;
+  const { ir, href } = useNav();
+  // <a> com href + onClick, em vez de <Link>: no app de TV não existe
+  // roteamento por URL nenhum (ver src/lib/nav.tsx), então quem decide o
+  // destino é sempre o ir(). Na web o href continua real, só pra o link
+  // parecer/copiar-se como link de verdade.
+  const destino: Tela = resume
+    ? { nome: "player", id: title.id }
+    : { nome: "titulo", id: title.id };
   return (
-    <Link href={href} className="card">
+    <a
+      href={href(destino)}
+      className="card"
+      onClick={(e) => {
+        e.preventDefault();
+        ir(destino);
+      }}
+    >
       <div className="card-poster">
         <img src={posterUrl(title.id)} alt={title.titulo} loading="lazy" />
         {typeof progressPct === "number" && (
@@ -31,6 +47,6 @@ export function Card({ title, progressPct, resume }: CardProps) {
         )}
       </div>
       <div className="card-name">{title.titulo}</div>
-    </Link>
+    </a>
   );
 }

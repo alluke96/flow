@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type TouchEvent } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useNav } from "@/lib/nav";
 import type { TitleSummary } from "@/types/catalog";
 import { bannerUrl } from "@/lib/api-client";
 import { metaLine } from "@/lib/format";
@@ -18,7 +17,7 @@ const FADE_MS = 900;
 const SWIPE_THRESHOLD_PX = 50;
 
 export function Hero({ titles }: { titles: TitleSummary[] }) {
-  const router = useRouter();
+  const { ir, href } = useNav();
   const { getProgress } = useProfiles();
   const [index, setIndex] = useState(0);
   // Guarda o id do título pra que o aviso "ainda não disponível" apareça só
@@ -112,7 +111,7 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
       setUnavailableId(title.id);
       return;
     }
-    router.push(`/watch/${title.id}`);
+    ir({ nome: "player", id: title.id });
   }
 
   function goTo(delta: 1 | -1) {
@@ -172,9 +171,16 @@ export function Hero({ titles }: { titles: TitleSummary[] }) {
           <button className="btn-hero play" onClick={handlePlay}>
             ▶ {hasProgress ? "Continuar assistindo" : "Assistir"}
           </button>
-          <Link href={`/title/${title.id}`} className="btn-hero info">
+          <a
+            href={href({ nome: "titulo", id: title.id })}
+            className="btn-hero info"
+            onClick={(e) => {
+              e.preventDefault();
+              ir({ nome: "titulo", id: title.id });
+            }}
+          >
             ⓘ Detalhes
-          </Link>
+          </a>
         </div>
         {unavailable && <p className="unavailable-notice">Ainda não disponível.</p>}
       </div>
