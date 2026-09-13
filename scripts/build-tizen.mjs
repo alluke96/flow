@@ -120,6 +120,11 @@ try {
       FLOW_TIZEN: "1",
       NEXT_PUBLIC_FLOW_SERVER: servidor,
       NEXT_PUBLIC_FLOW_VERSAO: versao,
+      // Marca o build como "app de TV" pro código do NAVEGADOR (ver
+      // src/lib/tv.ts). FLOW_TIZEN, logo abaixo, só chega no código de
+      // servidor; esta aqui é a mesma informação do lado de cá, e precisa
+      // do prefixo NEXT_PUBLIC pro empacotador embutir o valor.
+      NEXT_PUBLIC_FLOW_TV: "1",
     },
   });
 } finally {

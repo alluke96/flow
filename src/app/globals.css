@@ -482,6 +482,16 @@ a {
   width: 160px;
   transition: width 0.2s;
 }
+/* O mesmo desenho do campo, mas como botão (só no app de TV — ver TopNav).
+   Sem isto ele herdaria a altura mínima de alvo de toque dos botões e
+   ficaria mais alto que o campo que substitui. */
+.search-botao {
+  min-height: 0;
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
 .search-input:focus {
   width: 220px;
   outline: none;
@@ -1130,12 +1140,17 @@ a {
   background: rgba(255, 255, 255, 0.3);
   border-radius: 2px;
 }
+/* A linha tocada e a bolinha são BRANCAS, não vermelhas: o vermelho é a cor
+   de acento do Flow, e gastá-la na barra de progresso — que fica na tela o
+   tempo todo, em cima do vídeo — dava o mesmo player de todo mundo. Branco
+   sobre a trilha translúcida lê bem por cima de qualquer cena e deixa o
+   vermelho pro que de fato precisa chamar atenção. */
 .progress-fill {
   position: absolute;
   left: 0;
   top: 14px;
   height: 4px;
-  background: var(--accent);
+  background: var(--text);
   border-radius: 2px;
   width: 0%;
 }
@@ -1144,18 +1159,18 @@ a {
   top: 16px;
   width: 13px;
   height: 13px;
-  background: var(--accent);
+  background: var(--text);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(1);
   left: 0%;
   transition: transform 0.12s;
-  box-shadow: 0 0 0 0 rgba(255, 69, 58, 0);
+  box-shadow: 0 0 0 0 rgba(245, 245, 247, 0);
 }
 .progress-bar:hover .progress-handle,
 .progress-bar.dragging .progress-handle,
 .progress-bar:focus-visible .progress-handle {
   transform: translate(-50%, -50%) scale(1.35);
-  box-shadow: 0 0 0 6px rgba(255, 69, 58, 0.18);
+  box-shadow: 0 0 0 6px rgba(245, 245, 247, 0.22);
 }
 .progress-tooltip {
   position: absolute;
@@ -1817,5 +1832,5 @@ html.tv-widget .progress-bar:focus {
 }
 html.tv-widget .progress-bar:focus .progress-handle {
   transform: translate(-50%, -50%) scale(1.5);
-  box-shadow: 0 0 0 8px rgba(255, 69, 58, 0.28);
+  box-shadow: 0 0 0 8px rgba(245, 245, 247, 0.3);
 }

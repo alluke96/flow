@@ -167,7 +167,14 @@ export function NavEstadoProvider({
       // chegar no começo.
       const anterior = pilhaRef.current[pilhaRef.current.length - 1];
       if (anterior && hrefDeTela(anterior) === hrefDeTela(tela)) pilhaRef.current.pop();
-      else pilhaRef.current.push(telaAtualRef.current);
+      // O PLAYER nunca entra na pilha: voltar não pode reabrir o vídeo.
+      //
+      // Sem esta regra, quem entra direto no vídeo pelo card de "continuar
+      // assistindo" (que pula a tela do título) ficava preso: sair do player
+      // empilhava o player, o Return voltava pra dentro dele, sair de novo
+      // empilhava de novo — vídeo, título, vídeo, título, pra sempre, sem
+      // nunca chegar no começo.
+      else if (telaAtualRef.current.nome !== "player") pilhaRef.current.push(telaAtualRef.current);
     }
     telaAtualRef.current = tela;
     setTelaAtual(tela);
