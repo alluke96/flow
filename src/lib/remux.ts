@@ -27,10 +27,22 @@ import { horaLog } from "@/lib/log";
  */
 
 let disponivel: boolean | null = null;
+let checadoEm = 0;
+/** Achou: não precisa perguntar de novo. Não achou: pode ser que instalem. */
+const REPETIR_CHECAGEM_MS = 60_000;
 
-/** O ffmpeg existe nesta máquina? Checado uma vez só. */
+/**
+ * O ffmpeg existe nesta máquina?
+ *
+ * A resposta positiva vale pra sempre; a negativa só por um minuto. Essa
+ * assimetria existe pra quem acabou de instalar o ffmpeg não precisar
+ * adivinhar que o serviço inteiro tem que ser reiniciado pra deixar de
+ * ouvir "não tem" — ele volta a procurar sozinho.
+ */
 export async function ffmpegDisponivel(): Promise<boolean> {
-  if (disponivel !== null) return disponivel;
+  if (disponivel === true) return true;
+  if (disponivel === false && Date.now() - checadoEm < REPETIR_CHECAGEM_MS) return false;
+  checadoEm = Date.now();
   disponivel = await new Promise<boolean>((resolve) => {
     try {
       const p = spawn(caminhoFfmpeg(), ["-version"], { stdio: "ignore" });
