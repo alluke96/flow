@@ -167,15 +167,24 @@ export function useTVNav() {
       const direction = ARROW_DIRECTIONS[e.key];
       if (!direction) return;
 
-      // Left/Right belong to whatever is focused when that element uses
-      // them itself: the progress bar (role="slider", ±5s), the speed
-      // <select>, the volume <input type=range>. Moving the focus away on
-      // those keys would make the control impossible to operate with a
-      // remote — Up/Down still leave it.
+      // Who owns Left/Right when a form control has the focus.
+      //
+      // The progress bar (role="slider") always keeps them: arrows ARE how
+      // you scrub, and Up/Down still walk away from it.
+      //
+      // A <select> (speed) or <input type=range> (volume) is the opposite
+      // on a TV. There is no Tab on a remote, so a control that eats
+      // Left/Right while merely focused is a trap: the focus goes in and
+      // never comes out, and every press changes a value the user was only
+      // passing by. Inside the widget the arrows move the focus instead,
+      // and the control is operated the way a TV user expects — press OK
+      // to open it, and the TV's own list handles the keys from there.
+      // On the web they keep the native behavior: there, Tab gets out.
       const active = document.activeElement;
       const tag = active?.tagName;
+      const naTv = document.documentElement.classList.contains("tv-widget");
       const usesArrows =
-        tag === "SELECT" || tag === "INPUT" || active?.getAttribute("role") === "slider";
+        active?.getAttribute("role") === "slider" || (!naTv && (tag === "SELECT" || tag === "INPUT"));
       if (usesArrows && (direction === "left" || direction === "right")) return;
 
       if (inPlayer) {
