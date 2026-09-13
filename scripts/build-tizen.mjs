@@ -155,7 +155,13 @@ writeFileSync(
     .replace(/:HL\[\\"[^\]]*?\.woff2[^\]]*?\]/g, ":HL[]")
 );
 
-// Relator de erros do widget. Dentro da TV não há console alcançável (sem
+// Preparo + relator do widget (tizen-boot.js). Faz duas coisas, nesta
+// ordem, e é o PRIMEIRO script do <head> por causa das duas:
+//
+//  1. Define os globais que o Chromium 69 da TV não tem mas que o runtime
+//     do bundler e o React usam (globalThis, queueMicrotask). Sem isso
+//     nenhum chunk do app chega a executar.
+//  2. Reporta erros. Dentro da TV não há console alcançável (sem
 // DevTools, e `sdb dlog` não devolve nada nela), então qualquer falha que
 // impeça o app de subir seria invisível — foi exatamente o que aconteceu
 // com o spinner eterno na primeira tentativa.
@@ -170,6 +176,25 @@ writeFileSync(
 // bundles do app forem avaliados — inclusive pra pegar erro de SINTAXE
 // deles, que dispara window.onerror antes de qualquer código do app rodar.
 const relator = `(function () {
+  // ---- globalThis ----
+  // PRECISA vir antes de qualquer chunk do app. O runtime do bundler
+  // referencia \`globalThis\` logo na primeira linha de cada chunk, e ele só
+  // existe a partir do Chrome 71 — esta TV é Chromium 69 (confirmado pelo
+  // user agent que este mesmo arquivo reporta). Resultado sem isto:
+  // "Uncaught ReferenceError: globalThis is not defined" em TODOS os
+  // chunks, nenhum código do app roda, e sobra o HTML pré-renderizado na
+  // tela (o spinner eterno). Browserslist não cobre este caso: ele baixa a
+  // SINTAXE, não define globais que o runtime do empacotador usa.
+  if (typeof globalThis === "undefined") {
+    window.globalThis = window;
+  }
+  // Mesma família de buraco: queueMicrotask é Chrome 71, e o React usa.
+  if (typeof window.queueMicrotask !== "function") {
+    window.queueMicrotask = function (cb) {
+      Promise.resolve().then(cb);
+    };
+  }
+
   var SERVIDOR = ${JSON.stringify(servidor.replace(/\/$/, ""))};
   function avisar(texto) {
     try {
@@ -200,7 +225,7 @@ const relator = `(function () {
     }, 5000);
   });
 })();`;
-writeFileSync(join(destino, "tizen-debug.js"), relator);
+writeFileSync(join(destino, "tizen-boot.js"), relator);
 // Farol que NÃO depende de JavaScript: uma <img> que o navegador busca só
 // de parsear o HTML. É o que separa "o JS não roda" de "a TV não alcança o
 // PC" — se esta chegar no flow.log e a do tizen-debug.js não, o HTML e a
@@ -215,7 +240,7 @@ const farolSemJs =
 writeFileSync(
   indexHtml,
   readFileSync(indexHtml, "utf8")
-    .replace("<head>", '<head><script src="./tizen-debug.js"></script>')
+    .replace("<head>", '<head><script src="./tizen-boot.js"></script>')
     .replace("<body", farolSemJs + "<body")
 );
 

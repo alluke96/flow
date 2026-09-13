@@ -140,18 +140,38 @@ mesmo com Developer Mode ligado). Duas saídas:
   um quadro de diagnóstico com os eventos de entrada, o estado do player e
   se o AVPlay está mesmo ativo. Agora ele aparece normalmente: sem iframe,
   nada desenha por cima dele.
-- **Log no servidor** — o build injeta um `tizen-debug.js` que roda ANTES
-  de tudo e reporta pro `flow.log` do PC: user agent da TV, qualquer erro
-  de JavaScript (inclusive erro de sintaxe nos bundles, que mata o app
-  antes de qualquer código nosso rodar), script que falhou ao carregar,
-  violação de CSP, e um balanço 5s depois dizendo se a interface hidratou.
-  É a única janela pra dentro do widget quando o app não sobe.
+- **Log no servidor** — o build injeta um `tizen-boot.js` que roda ANTES de
+  tudo e reporta pro `flow.log` do PC: user agent da TV, qualquer erro de
+  JavaScript (inclusive erro de sintaxe nos bundles, que mata o app antes
+  de qualquer código nosso rodar), script que falhou ao carregar, violação
+  de CSP, e um balanço 5s depois dizendo se a interface hidratou. É a única
+  janela pra dentro do widget quando o app não sobe — foi ela que achou o
+  `globalThis` faltando (ver abaixo). Além do log, esse mesmo arquivo
+  define os globais que o Chromium 69 da TV não tem.
   ```powershell
   Get-Content C:\flow-secrets\flow.log -Wait -Tail 50 | Select-String tizen-debug
   ```
 
 Pra conferir o modo de tela única sem instalar nada na TV, abra `/tv` no
 navegador — é exatamente o mesmo componente que vai empacotado.
+
+## O navegador da TV é antigo (Chromium 69)
+
+O user agent do aparelho é `Tizen 5.5 ... Chrome/69.0.3497.106`. Duas
+consequências que já morderam, as duas com o mesmo sintoma (carregamento
+eterno, sem erro visível) e causas diferentes:
+
+- **Sintaxe**: `?.`, `??` e `??=` são Chrome 80/85. Resolvido pelo
+  `browserslist` no `package.json` (`chrome >= 63`), que faz o compilador
+  baixar a sintaxe e o Next injetar polyfills.
+- **Globais**: `globalThis` é Chrome 71 e o runtime do empacotador usa ele
+  na primeira linha de CADA chunk; `queueMicrotask` é 71 e o React usa.
+  Browserslist não cobre isso — ele baixa sintaxe, não define globais.
+  Resolvido no `tizen-boot.js`, que roda antes de qualquer chunk.
+
+Se um dia o app voltar a ficar num carregamento eterno depois de atualizar
+dependência, o primeiro lugar pra olhar é o `flow.log`: o erro vem de lá
+com nome e arquivo.
 
 ## Limitação conhecida
 

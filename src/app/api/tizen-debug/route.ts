@@ -13,9 +13,26 @@ import { horaLog } from "@/lib/log";
  * imagens, vídeo), então uma chamada a mais sempre chega.
  *
  * Só um GET com `?msg=`, sem persistir nada — janela pro log, não histórico.
+ *
+ * Responde um GIF 1x1 transparente, não JSON: os faróis do widget são
+ * `<img>`/`new Image()` (a forma que atravessa qualquer CSP e não depende
+ * de fetch nem de CORS), e devolver JSON pra uma <img> faz o navegador
+ * tratar como imagem quebrada — o que aparecia no próprio log como um
+ * enganoso "falhou ao carregar".
  */
+const GIF_1X1 = Buffer.from(
+  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+  "base64"
+);
+
 export async function GET(req: NextRequest) {
   const msg = req.nextUrl.searchParams.get("msg") ?? "(vazio)";
   console.log(`[${horaLog()}] [tizen-debug] ${msg}`);
-  return NextResponse.json({ ok: true });
+  return new NextResponse(GIF_1X1, {
+    headers: {
+      "Content-Type": "image/gif",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 }
