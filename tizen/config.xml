@@ -17,6 +17,14 @@
 <widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://yourdomain/flow" version="0.2.1" viewmodes="maximized">
     <tizen:application id="Pnz6w3CQfO.flow" package="Pnz6w3CQfO" required_version="2.3"/>
     <content src="index.html"/>
+    <!-- Acesso à rede. Isto passou a ser necessário quando o app foi pra
+         DENTRO do widget: antes quem falava com o PC era o <iframe> (uma
+         navegação do navegador, que não passa por esta política), agora é o
+         próprio widget que busca catálogo, imagens, perfis e vídeo. Sem
+         declarar a origem aqui, o widget pode simplesmente não conseguir
+         alcançar o servidor — e o app fica num carregamento eterno, sem
+         erro visível em lugar nenhum. Troque pelo IP do seu PC. -->
+    <access origin="http://192.168.15.7:3000" subdomains="false"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
     <icon src="icon.png"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="true"/>

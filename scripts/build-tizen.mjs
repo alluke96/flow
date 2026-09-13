@@ -201,9 +201,22 @@ const relator = `(function () {
   });
 })();`;
 writeFileSync(join(destino, "tizen-debug.js"), relator);
+// Farol que NÃO depende de JavaScript: uma <img> que o navegador busca só
+// de parsear o HTML. É o que separa "o JS não roda" de "a TV não alcança o
+// PC" — se esta chegar no flow.log e a do tizen-debug.js não, o HTML e a
+// rede estão de pé e o problema é execução de script; se nenhuma das duas
+// chegar, o widget não está conseguindo falar com o servidor, e aí é
+// <access>/privilege no config.xml, não código.
+const farolSemJs =
+  `<img src="${servidor.replace(/\/$/, "")}/api/tizen-debug?msg=` +
+  `${encodeURIComponent("[widget] HTML parseou (sem JS) | versao=" + versao)}"` +
+  ` alt="" width="1" height="1" style="position:absolute;opacity:0"/>`;
+
 writeFileSync(
   indexHtml,
-  readFileSync(indexHtml, "utf8").replace("<head>", '<head><script src="./tizen-debug.js"></script>')
+  readFileSync(indexHtml, "utf8")
+    .replace("<head>", '<head><script src="./tizen-debug.js"></script>')
+    .replace("<body", farolSemJs + "<body")
 );
 
 // Peso morto dentro do widget:

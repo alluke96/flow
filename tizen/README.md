@@ -96,9 +96,23 @@ pelo do seu PC (o mesmo que você passa pro `npm run build:tizen`):
 <tizen:content-security-policy>default-src 'self' data: blob: http://192.168.15.7:3000; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://192.168.15.7:3000; media-src 'self' http://192.168.15.7:3000; connect-src 'self' http://192.168.15.7:3000</tizen:content-security-policy>
 ```
 
-Não declare privilege de internet nem `<access>`: o perfil `tv-samsung`
-recusa o projeto e o launch nem começa. O AVPlay também não precisa de
-privilege — desde os modelos de 2015 a Samsung não exige mais isso.
+**A outra linha que passou a ser necessária** com o app dentro do widget:
+o `<access>`. Antes quem falava com o PC era o `<iframe>` — uma navegação
+do navegador, que não passa pela política de acesso do widget. Agora é o
+próprio widget que busca catálogo, imagens, perfis e vídeo, e aí a origem
+precisa estar declarada:
+
+```xml
+<access origin="http://192.168.15.7:3000" subdomains="false"/>
+```
+
+(Numa versão anterior deste README dizia pra NÃO declarar `<access>` —
+aquilo valia pra montagem com iframe, em que o widget não fazia requisição
+nenhuma. Se o validador reclamar de alguma coisa ao adicionar, é a
+mensagem dele que manda, não este texto.)
+
+O AVPlay não precisa de privilege: desde os modelos de 2015 a Samsung não
+exige mais isso.
 
 ### Ícone
 
