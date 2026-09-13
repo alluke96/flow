@@ -391,7 +391,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
           }
           return carimbar({
             ...p,
-            continuarAssistindo: [...rest, { tituloId, episodioId, progressoSegundos }],
+            continuarAssistindo: [
+              ...rest,
+              { tituloId, episodioId, progressoSegundos, duracaoSegundos },
+            ],
           });
         }),
       }));

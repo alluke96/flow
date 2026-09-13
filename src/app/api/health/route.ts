@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isDriveConfigured } from "@/lib/drive/client";
+import { ffmpegDisponivel } from "@/lib/remux";
 import pkg from "../../../../package.json";
 
 /**
@@ -25,6 +26,12 @@ export async function GET() {
       version: pkg.version,
       catalogSource: usingDrive ? "drive" : "mock",
       driveConfigured: usingDrive,
+      // Só o app de TV se importa: é com isto que ele decide se pode pedir o
+      // vídeo já começando num ponto (ver src/lib/remux.ts). Sem ffmpeg
+      // nesta máquina, ele nem tenta — pedir e receber o arquivo inteiro do
+      // início seria pior, porque a barra mostraria um ponto onde o vídeo
+      // não está.
+      ffmpeg: await ffmpegDisponivel(),
     },
     { headers: { "Cache-Control": "no-store" } }
   );

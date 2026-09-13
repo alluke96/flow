@@ -8,6 +8,17 @@ export interface WatchProgress {
   tituloId: string;
   episodioId: string | null;
   progressoSegundos: number;
+  /**
+   * Duração total do que estava sendo assistido. Opcional porque só passou
+   * a ser gravada depois — entrada antiga não tem, e quem lê precisa
+   * aguentar isso.
+   *
+   * Existe por causa do app de TV: quando o vídeo é entregue já começando
+   * no ponto salvo (ver src/lib/remux.ts), o stream não carrega duração
+   * nenhuma, e sem este campo a barra de progresso abriria sem fim e o
+   * salvamento não teria com o que comparar.
+   */
+  duracaoSegundos?: number;
 }
 
 export interface Profile {

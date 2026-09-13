@@ -32,6 +32,8 @@ interface VideoPlayerProps {
   episodeId: string | null;
   displayTitle: string;
   initialTime: number;
+  /** Ver Resolved em WatchScreen — só o app de TV usa. */
+  duracaoConhecida?: number;
   onExit: () => void;
   onNextEpisode?: () => void;
 }
@@ -63,6 +65,7 @@ export function VideoPlayer({
   episodeId,
   displayTitle,
   initialTime,
+  duracaoConhecida,
   onExit,
   onNextEpisode,
 }: VideoPlayerProps) {
@@ -257,10 +260,12 @@ export function VideoPlayer({
   // que dispara.
   const srcRef = useRef(src);
   const initialTimeRef = useRef(initialTime);
+  const duracaoConhecidaRef = useRef(duracaoConhecida);
   useEffect(() => {
     srcRef.current = src;
     initialTimeRef.current = initialTime;
-  }, [src, initialTime]);
+    duracaoConhecidaRef.current = duracaoConhecida;
+  }, [src, initialTime, duracaoConhecida]);
 
   // retoma de onde parou (progresso salvo do perfil) assim que os metadados carregam
   const handleLoadedMetadata = useCallback(() => {
@@ -300,7 +305,7 @@ export function VideoPlayer({
   // desmonte que não passe por ali, ex: troca direta de episódio).
   useEffect(() => {
     if (!nativeMode) return;
-    tz.api.open(srcRef.current, initialTimeRef.current);
+    tz.api.open(srcRef.current, initialTimeRef.current, duracaoConhecidaRef.current);
     document.documentElement.classList.add("native-player-ativo");
     document.body.classList.add("native-player-ativo");
     return () => {

@@ -99,6 +99,25 @@ function estadoNativo(avplay: AVPlay): string {
   }
 }
 
+/**
+ * O servidor consegue entregar o vídeo já começando num ponto? (depende de
+ * ter ffmpeg — ver src/lib/remux.ts). A resposta vale pra sessão inteira e
+ * é compartilhada por todo mundo que usa este módulo: a pergunta sai uma
+ * vez só, assim que o app abre, e não na hora aflita de abrir um vídeo.
+ */
+let promessaPodeCortar: Promise<boolean> | null = null;
+
+function servidorPodeCortar(): Promise<boolean> {
+  if (!promessaPodeCortar) {
+    const servidor = process.env.NEXT_PUBLIC_FLOW_SERVER ?? "";
+    promessaPodeCortar = fetch(`${servidor}/api/health`)
+      .then((r) => r.json())
+      .then((dados: { ffmpeg?: boolean }) => dados.ffmpeg === true)
+      .catch(() => false);
+  }
+  return promessaPodeCortar;
+}
+
 export function logarServidor(mensagem: string): void {
   // Só DENTRO do widget. Sem esta guarda, agora que o log é usado também
   // pelo salvamento de progresso (compartilhado com a web), todo navegador
@@ -172,7 +191,7 @@ const ESTADO_INICIAL: TizenPlayerState = {
 };
 
 export interface TizenPlayerApi {
-  open(url: string, startTime: number): void;
+  open(url: string, startTime: number, duracaoConhecida?: number): void;
   play(): void;
   pause(): void;
   seekTo(time: number): void;
@@ -214,6 +233,16 @@ export function useTizenPlayer(): UseTizenPlayerResult {
   // null = ainda não se sabe; false = esta TV ignorou a posição inicial, e
   // aí reabrir o vídeo pra buscar só faria perder o lugar (ver abaixo).
   const posicaoInicialFuncionaRef = useRef<boolean | null>(null);
+  // Quantos segundos do vídeo ficaram FORA do que está tocando, porque o
+  // servidor entregou o trecho já cortado (ver src/lib/remux.ts). O player
+  // conta o tempo a partir do corte; somar isto devolve o tempo do filme.
+  const offsetRef = useRef(0);
+  // Duração total do título, que o trecho cortado não carrega. Vem de quem
+  // abriu (o progresso salvo) ou do próprio player, quando ele toca o
+  // arquivo inteiro e sabe responder.
+  const duracaoConhecidaRef = useRef(0);
+  // O servidor consegue cortar? (tem ffmpeg). null = ainda perguntando.
+  const podeCortarRef = useRef<boolean | null>(null);
   const timerReaberturaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -249,21 +278,34 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         try {
           const ms = avplay.getCurrentTime();
           if (typeof ms === "number" && ms >= 0) {
-            estadoRef.current.currentTime = ms / 1000;
+            // O player conta a partir do corte; o app conta a partir do
+            // começo do filme.
+            const absoluto = offsetRef.current + ms / 1000;
+            estadoRef.current.currentTime = absoluto;
             const alvo = alvoPendenteRef.current;
             if (alvo !== null) {
               // Chegou onde foi pedido — ou não chegou e já passou tempo
               // demais (a reabertura também não pegou): de um jeito ou de
               // outro, voltar a mostrar o tempo real é melhor que uma barra
               // congelada num ponto onde o vídeo não está.
-              const chegou = Math.abs(ms / 1000 - alvo) < 5;
+              const chegou = Math.abs(absoluto - alvo) < 5;
               const cansou = Date.now() - alvoPendenteDesdeRef.current > LIMITE_ALVO_PENDENTE_MS;
               if (chegou || cansou) alvoPendenteRef.current = null;
             }
             estadoRef.current.seekPendente = alvoPendenteRef.current;
           }
           const durMs = avplay.getDuration();
-          if (typeof durMs === "number" && durMs > 0) estadoRef.current.duration = durMs / 1000;
+          if (offsetRef.current > 0) {
+            // Trecho cortado: o stream não carrega duração (e se carregar,
+            // é a do PEDAÇO). A total é a que veio de quem abriu.
+            estadoRef.current.duration =
+              duracaoConhecidaRef.current ||
+              (typeof durMs === "number" && durMs > 0 ? offsetRef.current + durMs / 1000 : 0);
+          } else if (typeof durMs === "number" && durMs > 0) {
+            estadoRef.current.duration = durMs / 1000;
+            // Guarda pra quando o vídeo for reaberto cortado mais adiante.
+            duracaoConhecidaRef.current = durMs / 1000;
+          }
         } catch {
           // player entre estados (fechando, trocando de mídia): a próxima
           // volta do intervalo lê de novo
@@ -296,6 +338,24 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       );
     }, BATIMENTO_MS);
     return () => clearInterval(t);
+  }, [active]);
+
+  // Pergunta UMA vez se o servidor consegue cortar o vídeo no ponto. Sem
+  // isso a gente pediria `inicio=` no escuro: se o servidor não tivesse
+  // ffmpeg, ele devolveria o arquivo inteiro do começo enquanto a barra
+  // mostraria o ponto pedido — o vídeo num lugar e a interface em outro,
+  // que é pior que não ter o recurso.
+  useEffect(() => {
+    if (!active) return;
+    let vivo = true;
+    servidorPodeCortar().then((pode) => {
+      if (!vivo) return;
+      podeCortarRef.current = pode;
+      logarServidor(`servidor ${pode ? "PODE" : "nao pode"} cortar o video no ponto`);
+    });
+    return () => {
+      vivo = false;
+    };
   }, [active]);
 
   const fechar = useCallback(() => {
@@ -331,19 +391,29 @@ export function useTizenPlayer(): UseTizenPlayerResult {
     fechar();
   }, [fechar]);
 
-  const abrir = useCallback(
-    (url: string, startTime: number) => {
+  const abrirAgora = useCallback(
+    (url: string, startTime: number, duracaoConhecida?: number) => {
       const avplay = pegarAvplay();
       if (!avplay) return;
       fechar();
+      if (duracaoConhecida && duracaoConhecida > 0) duracaoConhecidaRef.current = duracaoConhecida;
       // `fechar` zera o espelho: abrir é sempre carregar alguma coisa, e a
       // interface tem que mostrar isso desde o primeiro instante.
       estadoRef.current.buffering = true;
 
       urlRef.current = url;
+      // Pedir o vídeo JÁ COMEÇANDO no ponto é o que substitui a busca neste
+      // aparelho (ver src/lib/remux.ts pro porquê). `tv=1` é o que faz o
+      // servidor tratar este pedido diferente — nenhum outro cliente manda.
+      const cortarNoServidor = startTime > 1 && podeCortarRef.current === true;
+      offsetRef.current = cortarNoServidor ? Math.floor(startTime) : 0;
+      const urlFinal = cortarNoServidor
+        ? `${url}${url.includes("?") ? "&" : "?"}inicio=${offsetRef.current}&tv=1`
+        : url;
+
       try {
-        logarServidor(`abrindo ${url}`);
-        avplay.open(url);
+        logarServidor(`abrindo ${urlFinal}`);
+        avplay.open(urlFinal);
         // LETTER_BOX preserva a proporção do vídeo dentro do retângulo (em
         // vez de esticar pra preencher, que distorce em conteúdo que não
         // seja exatamente 16:9).
@@ -392,7 +462,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         // tocando, mesmo 10s à frente), e era por isso que "continuar
         // assistindo" recomeçava do zero.
         const alvoMs = Math.round(startTime * 1000);
-        if (startTime > 1) {
+        if (startTime > 1 && !cortarNoServidor) {
           try {
             avplay.seekTo(alvoMs);
             logarServidor(`posicao inicial ${alvoMs}ms pedida antes do prepare`);
@@ -427,7 +497,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
                 const p2 = pegarAvplay();
                 if (!p2 || !abertoRef.current) return;
                 try {
-                  const atualMs = p2.getCurrentTime();
+                  const atualMs = offsetRef.current * 1000 + p2.getCurrentTime();
                   const pegou = Math.abs(atualMs - alvoMs) <= 5000;
                   posicaoInicialFuncionaRef.current = pegou;
                   logarServidor(`retomada ${pegou ? "ok" : "NAO pegou"}: pedi ${alvoMs}ms, estou em ${atualMs}ms`);
@@ -447,6 +517,30 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       }
     },
     [fechar]
+  );
+
+  /**
+   * Abrir de verdade, mas só depois de saber se o servidor consegue cortar
+   * o vídeo no ponto — a resposta muda a URL que vai ser pedida.
+   *
+   * A espera só acontece quando há ponto de retomada E a resposta ainda não
+   * chegou, o que na prática é raro: a pergunta sai quando o app abre, e o
+   * player só entra em cena vários segundos depois. Sem ela, porém, a
+   * PRIMEIRA retomada da sessão — justo a que mais importa — cairia no
+   * caminho antigo por uma corrida de milissegundos.
+   */
+  const abrir = useCallback<TizenPlayerApi["open"]>(
+    (url, startTime, duracaoConhecida) => {
+      if (startTime > 1 && podeCortarRef.current === null) {
+        servidorPodeCortar().then((pode) => {
+          podeCortarRef.current = pode;
+          abrirAgora(url, startTime, duracaoConhecida);
+        });
+        return;
+      }
+      abrirAgora(url, startTime, duracaoConhecida);
+    },
+    [abrirAgora]
   );
 
   /**
@@ -480,7 +574,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
       // buscar ainda faria o usuário PERDER o lugar em que estava. Melhor
       // não fazer nada — a busca simplesmente não existe neste aparelho, e
       // a barra volta a mostrar onde o vídeo está de verdade.
-      if (posicaoInicialFuncionaRef.current === false) {
+      if (posicaoInicialFuncionaRef.current === false && podeCortarRef.current !== true) {
         alvoPendenteRef.current = null;
         estadoRef.current.seekPendente = null;
         logarServidor(`busca pra ${alvo.toFixed(1)}s ignorada: esta TV nao aceita nem posicao inicial`);
@@ -498,7 +592,7 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         const destino = alvoPendenteRef.current;
         if (destino === null || !urlRef.current) return;
         logarServidor(`reabrindo em ${destino.toFixed(1)}s (a TV recusou a busca)`);
-        abrir(urlRef.current, destino);
+        abrir(urlRef.current, destino, duracaoConhecidaRef.current);
       }, ATRASO_REABERTURA_MS);
     },
     [abrir]

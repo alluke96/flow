@@ -35,6 +35,13 @@ function flattenEpisodes(title: TitleDetail): EpisodeWithSeason[] {
 interface Resolved {
   episodeId: string | null;
   initialTime: number;
+  /**
+   * Duração do que foi salvo, quando se sabe. Só serve pro app de TV: lá o
+   * vídeo pode vir já cortado no ponto de retomada (ver src/lib/remux.ts) e
+   * esse stream não carrega duração nenhuma — é daqui que a barra de
+   * progresso tira o total até o player descobrir sozinho.
+   */
+  duracaoConhecida?: number;
 }
 
 function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null }) {
@@ -117,7 +124,11 @@ function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null })
 
     if (title.tipo !== "serie") {
       const progress = getProgressRef.current(title.id);
-      setResolved({ episodeId: null, initialTime: progress?.progressoSegundos ?? 0 });
+      setResolved({
+        episodeId: null,
+        initialTime: progress?.progressoSegundos ?? 0,
+        duracaoConhecida: progress?.duracaoSegundos,
+      });
       return;
     }
 
@@ -131,8 +142,12 @@ function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null })
       epId = (allEpisodes.find((e) => e.id === progress?.episodioId) ?? allEpisodes[0])?.id ?? null;
     }
     const progress = getProgressRef.current(title.id);
-    const initialTime = progress && progress.episodioId === epId ? progress.progressoSegundos : 0;
-    setResolved({ episodeId: epId, initialTime });
+    const doEpisodio = progress && progress.episodioId === epId ? progress : null;
+    setResolved({
+      episodeId: epId,
+      initialTime: doEpisodio?.progressoSegundos ?? 0,
+      duracaoConhecida: doEpisodio?.duracaoSegundos,
+    });
     // getProgress vem por ref de propósito (ver comentário acima) — é por
     // isso que não entra aqui: refs não recriam o efeito ao mudar.
   }, [title, epFromUrl]);
@@ -186,6 +201,7 @@ function WatchInner({ id, epFromUrl }: { id: string; epFromUrl: string | null })
       episodeId={resolved.episodeId}
       displayTitle={displayTitle}
       initialTime={resolved.initialTime}
+      duracaoConhecida={resolved.duracaoConhecida}
       onExit={() => ir({ nome: "titulo", id: title.id })}
       onNextEpisode={
         nextEpisode

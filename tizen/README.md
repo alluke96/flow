@@ -214,7 +214,69 @@ O build do widget marca o `<html>` com a classe `tv-widget` (ver
   Na web isso tudo está escrito em `:focus-visible`, que esta TV não
   conhece, então aparece repetido ali em `:focus`.
 
-## Busca (seek) nesta TV
+## Busca (seek) nesta TV: o vídeo vem cortado do servidor
+
+**Resumo:** esta TV não navega dentro do arquivo. Então o servidor entrega
+o vídeo já começando no ponto pedido, e o player só faz o que sabe fazer —
+tocar do início.
+
+### Por que
+
+O AVPlay recusa toda busca neste aparelho: `PLAYER_ERROR_INVALID_STATE`,
+imediato, em `PLAYING` e em `READY`, pelo `seekTo` e pelos
+`jumpForward`/`jumpBackward`, e até a posição inicial declarada antes do
+`prepare` (o caminho que a Samsung documenta pra "começar de tal ponto") é
+simplesmente ignorada. Velocidade diferente de 1x falha junto, com
+"Internal error" — busca e velocidade são a mesma família pra ele (trick
+play). No log do servidor dá pra ver o resto da história: o player pede o
+arquivo UMA vez, `bytes=0-`, e nunca mais pede outro intervalo.
+
+Não é o arquivo e não é o servidor, e isso foi conferido:
+
+- `/api/diag/mp4/<id>?ep=...` (ver src/lib/mp4-caixas.ts) mostra índice
+  (`moov`) na frente, H.264/AAC e keyframe a cada ~3s. O arquivo permite
+  navegar.
+- O endpoint de vídeo responde `206` com `Content-Range` e `Content-Length`
+  certos — conferido no pipeline inteiro, não só no papel.
+
+### Como funciona
+
+Quando o app de TV precisa começar em 4:08, ele pede
+`/api/stream/<id>?ep=...&inicio=248&tv=1`. O servidor chama o ffmpeg, que
+lê a própria rota por HTTP (com Range, então pula direto pro ponto sem
+baixar o que vem antes) e devolve um MPEG-TS que começa ali.
+
+- **Nada é recodificado** (`-c copy`): sem perda de qualidade, sem CPU de
+  encoder, e nenhum arquivo do Drive é alterado. O corte cai no keyframe
+  mais próximo — o mesmo lugar onde uma busca cairia.
+- **Só o app de TV recebe isso.** `tv=1` só sai de dentro do widget; PC e
+  celular continuam recebendo o MP4 com Range normal, e seguem buscando
+  como sempre. Essa separação é proposital: o caminho novo não toca em quem
+  já funciona.
+- ±10s e arrastar a barra viram uma reabertura no ponto (toques seguidos
+  são somados numa só). Custa alguns segundos de recarga.
+- O TS não carrega duração — é o preço de um stream gerado na hora. A
+  duração total vem do app, que a guarda junto do progresso.
+
+### O que precisa estar instalado
+
+**ffmpeg no PC do self-host.** Sem ele nada disso acontece: o app pergunta
+antes (`/api/health` responde `ffmpeg: true/false`) e, se não houver, nem
+tenta — o vídeo toca do começo, como antes.
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Se o ffmpeg não estiver no PATH do serviço (é o caso comum quando se baixa
+o .zip à mão), aponte o caminho em `C:\flow-secrets\.env.local`, que o
+deploy copia pra dentro do checkout a cada build:
+
+```
+FLOW_FFMPEG=C:\ffmpeg\bin\ffmpeg.exe
+```
+
+### Apêndice: o diagnóstico em detalhe
 
 O AVPlay **recusa toda busca com a mídia rodando** neste aparelho:
 `PLAYER_ERROR_INVALID_STATE`, imediato, sem nem chegar a pedir nada pro
@@ -225,16 +287,14 @@ AVPlay pra cá.) O servidor está fora dessa história: responde 206 com
 `Content-Range` e `Content-Length` certos, e nada disso chega a ser
 pedido.
 
-O que a TV aceita é dizer a posição **antes** de preparar o stream —
-`seekTo` logo depois do `open`, com o player ainda em IDLE, que é como a
-Samsung documenta "começar de tal ponto". É esse o caminho que o
-`tizen-player-bridge.ts` usa pra retomar de onde parou.
+A Samsung documenta um caminho pra "começar de tal ponto": `seekTo` logo
+depois do `open`, com o player ainda em IDLE. O código ainda tenta por ali
+quando o servidor não pode cortar — mas **nesta TV ele é ignorado calado**:
+pedimos 248290ms e o vídeo começou em 2537ms, sem erro nenhum. Foi o que
+sobrou de tentativa antes de virar a chave pro corte no servidor.
 
-Daí sai o plano B pro ±10s e pra barra de progresso: quando a busca é
-recusada, o vídeo é **reaberto já no ponto pedido**. Custa alguns segundos
-de recarga, e por isso toques seguidos são juntados (apertar +10s cinco
-vezes vira uma reabertura em +50s, não cinco recarregamentos). Onde a
-busca normal funciona — qualquer outro aparelho —, nada disso chega a
+O código ainda tenta a busca de verdade primeiro, toda vez. Onde ela
+funciona — qualquer outro aparelho —, nada do caminho de corte chega a
 rodar.
 
 ## Limitação conhecida

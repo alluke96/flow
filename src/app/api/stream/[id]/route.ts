@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCatalogSource } from "@/lib/catalog-source";
 import { episodeIdSchema, titleIdSchema } from "@/lib/validation";
 import { horaLog } from "@/lib/log";
+import { abrirTrechoRemuxado, ffmpegDisponivel } from "@/lib/remux";
 
 // A googleapis usa APIs do Node (streams, auth) — roda sempre no runtime Node,
 // nunca no Edge.
@@ -27,6 +28,56 @@ export async function GET(
 
   const source = getCatalogSource();
   const rangeHeader = req.headers.get("range");
+
+  // Entrega começando num ponto, pro app de TV (ver src/lib/remux.ts).
+  //
+  // Os dois parâmetros existem pra esta rota continuar EXATAMENTE como
+  // sempre foi pra todo o resto: `tv=1` só é enviado de dentro do widget
+  // Tizen (é lá que o player nativo vive, ver tizen-player-bridge.ts) e
+  // `inicio` só é pedido quando a busca de verdade já foi recusada pelo
+  // aparelho. Navegador de PC e celular nunca mandam nenhum dos dois, e
+  // seguem recebendo o arquivo com Range normal.
+  const inicioSegundos = Number(req.nextUrl.searchParams.get("inicio") ?? 0);
+  const doAppDeTv = req.nextUrl.searchParams.get("tv") === "1";
+  if (doAppDeTv && Number.isFinite(inicioSegundos) && inicioSegundos > 0) {
+    if (!(await ffmpegDisponivel())) {
+      // Sem ffmpeg não dá pra cortar — mas deixar de responder seria pior:
+      // melhor o vídeo tocar do começo (o comportamento de antes) do que
+      // não tocar. A linha abaixo é o que explica, pra quem for olhar o
+      // log, por que a TV voltou pro início.
+      console.error(
+        `[${horaLog()}] [stream] ffmpeg não encontrado: não dá pra começar em ${inicioSegundos}s.` +
+          ` Instale o ffmpeg ou aponte FLOW_FFMPEG pro executável (ver tizen/README.md).`
+      );
+    } else if (!(await source.getTitle(idResult.data))) {
+      // Confere que o título existe ANTES de criar um processo: sem isto,
+      // qualquer id bem-formado ligaria um ffmpeg. O conteúdo em si continua
+      // protegido pela própria rota, que o ffmpeg vai chamar (é lá que a
+      // allowlist de catálogo roda), mas processo à toa não passa daqui.
+      console.error(`[${horaLog()}] [stream] trecho pedido pra título desconhecido: ${idResult.data}`);
+      return NextResponse.json({ error: "vídeo não encontrado" }, { status: 404 });
+    } else {
+      // O ffmpeg lê pela PRÓPRIA rota, sem `inicio`: assim ele usa Range
+      // pra pular direto pro ponto e reaproveita toda a lógica de Drive,
+      // allowlist e cache que já existe aqui.
+      const origem = new URL(req.nextUrl.toString());
+      origem.searchParams.delete("inicio");
+      origem.searchParams.delete("tv");
+      console.log(`[${horaLog()}] [stream] trecho pra TV de ${idResult.data} ep=${episodeParam ?? "-"} a partir de ${inicioSegundos}s`);
+      const trecho = abrirTrechoRemuxado(origem.toString(), inicioSegundos, req.signal);
+      return new NextResponse(trecho.body, {
+        status: 200,
+        headers: {
+          "Content-Type": trecho.contentType,
+          // Sem Content-Length nem Range: o tamanho só se saberia gerando
+          // o stream inteiro, e o ponto todo é ele sair enquanto é gerado.
+          "Accept-Ranges": "none",
+          "Cache-Control": "private, no-store",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+  }
 
   // Log de toda entrada/saída deste endpoint — é o que falta pra
   // correlacionar "cliquei em +10s na TV" com o que o servidor de fato fez
