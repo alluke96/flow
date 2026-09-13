@@ -104,6 +104,19 @@ inteira (não dentro do DOM), tanto esta casca quanto o app dentro do
 iframe ficam com o fundo transparente enquanto ele toca — sem isso, a cor
 de fundo normal do site tampa o vídeo por completo, sem erro nenhum.
 
+**Depurando a casca sem DevTools:** o script desta casca loga tudo que
+importa (`console.log`) com o prefixo `[FlowAVPlay]` — inclusive qualquer
+erro não tratado que pare o script antes mesmo do handshake começar. Com a
+TV conectada por `sdb` (`sdb connect <ip-da-tv>`), dá pra ver esse log ao
+vivo enquanto o app roda:
+```
+sdb dlog | findstr FlowAVPlay
+```
+(troque `findstr` por `grep` fora do Windows). O overlay de debug do
+próprio app (5 toques na versão) mostra o lado de DENTRO do iframe —
+juntando os dois dá pra ver a troca de mensagens dos dois lados ao mesmo
+tempo.
+
 ## Atualizando
 
 Mudança no Flow (o app dentro do iframe) **não** exige reinstalar nada — a

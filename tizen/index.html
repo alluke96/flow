@@ -49,6 +49,17 @@
 (function () {
   "use strict";
 
+  // Se ALGUMA linha antes de registrar o listener de message lançar sem
+  // ninguém pegar, o script inteiro para ali — e o listener nunca chega a
+  // existir, explicando "postMessage recebidos: 0" sem erro nenhum visível
+  // (não tem DevTools nesta TV pra mostrar). Isto pelo menos deixa o erro
+  // visível no log do sistema (ver "log" mais abaixo).
+  window.addEventListener("error", function (e) {
+    try {
+      console.log("[FlowAVPlay] ERRO NÃO TRATADO:", e.message, "em", e.filename + ":" + e.lineno);
+    } catch (e2) {}
+  });
+
   // ------------------------------------------------------------------
   // Endereço do Flow no PC. É a ÚNICA coisa que você precisa mexer aqui.
   // Vale reservar esse IP no DHCP do roteador: se ele mudar, o app abre
@@ -59,6 +70,21 @@
   var frame = document.getElementById("flow");
   var splash = document.getElementById("splash");
   document.getElementById("alvo").textContent = URL_FLOW;
+
+  // Prefixo fixo pra filtrar no log do sistema via sdb (não tem DevTools
+  // nesta TV): "sdb dlog | findstr FlowAVPlay" (Windows) ou
+  // "sdb dlog | grep FlowAVPlay" (mac/Linux) enquanto o app roda. Existe
+  // só porque o postMessage entre a casca e o iframe está aparentemente
+  // não entregando NADA (overlay de debug mostrou "postMessage
+  // recebidos: 0") — sem isto não tinha como saber se o problema é a
+  // casca nem tentar mandar, ou mandar e falhar silenciosamente.
+  function log() {
+    try {
+      var args = Array.prototype.slice.call(arguments);
+      console.log.apply(console, ["[FlowAVPlay]"].concat(args));
+    } catch (e) {}
+  }
+  log("casca iniciando, URL_FLOW =", URL_FLOW);
 
   // Teclas de mídia do controle não chegam ao app sem registro explícito.
   // As de navegação (setas, Enter, Return) já vêm por padrão.
@@ -118,7 +144,7 @@
   // próprio overlay de debug do app, que a versão da CASCA instalada na TV
   // é de fato a que você acabou de reinstalar (em vez de confiar só em "eu
   // reinstalei"). Muda este texto sempre que mexer neste arquivo.
-  var CASCA_VERSAO = "avplay-2";
+  var CASCA_VERSAO = "avplay-3";
 
   var AVPLAY_CANAL = "flow-tizen-avplay";
   var avplayAberto = false;
@@ -135,7 +161,12 @@
 
   function mandarParaFlow(msg) {
     msg.channel = AVPLAY_CANAL;
-    try { frame.contentWindow.postMessage(msg, "*"); } catch (e) {}
+    try {
+      frame.contentWindow.postMessage(msg, "*");
+      log("mandou pro iframe:", JSON.stringify(msg));
+    } catch (e) {
+      log("ERRO ao mandar postMessage pro iframe:", String(e));
+    }
   }
 
   function pararEnvioDeEstado() {
@@ -258,6 +289,11 @@
 
   window.addEventListener("message", function (e) {
     var data = e.data;
+    // Loga TODA mensagem recebida, mesmo de canal errado/vazio — é
+    // exatamente o dado que falta pra saber se o iframe consegue mandar
+    // ALGUMA COISA pra cá, ou se o problema é só na volta (ver
+    // mandarParaFlow).
+    log("recebeu do iframe: origin=", e.origin, "data=", JSON.stringify(data));
     if (!data || data.channel !== AVPLAY_CANAL) return;
     switch (data.type) {
       case "ready":
@@ -292,6 +328,7 @@
         break;
     }
   });
+  log("listener de message registrado, indo carregar o iframe");
 
   frame.src = URL_FLOW;
 })();
