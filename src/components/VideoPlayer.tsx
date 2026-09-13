@@ -96,7 +96,10 @@ export function VideoPlayer({
   const [playbackError, setPlaybackError] = useState(false);
   const [playbackErrorDetail, setPlaybackErrorDetail] = useState<PlaybackErrorDetail | null>(null);
 
-  const { overlayHidden, showOverlay } = useOverlayVisibility(videoRef);
+  const { overlayHidden, showOverlay } = useOverlayVisibility(
+    videoRef,
+    nativeMode ? tzStateRef : undefined
+  );
   const {
     currentTime,
     setCurrentTime,
@@ -316,7 +319,23 @@ export function VideoPlayer({
       const el = nativeAreaRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      tz.api.setRect(Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height));
+      // O AVPlay quer PIXELS DA TELA. Com a ampliação de 10 pés (`zoom` na
+      // raiz, ver .tv-widget em globals.css) o documento passa a medir
+      // menos que a tela, e versões diferentes do Blink discordam sobre se
+      // getBoundingClientRect devolve o número já ampliado ou não — se vier
+      // o de antes da ampliação, o vídeo apareceria num retângulo menor no
+      // canto. Medir a PRÓPRIA raiz e comparar com a janela resolve sem
+      // depender de qual das duas convenções a TV segue: a razão dá 1
+      // quando não há ampliação nenhuma (todo o resto do mundo) e dá
+      // exatamente o fator quando o rect veio sem ela.
+      const larguraRaiz = document.documentElement.getBoundingClientRect().width;
+      const escala = larguraRaiz > 0 ? window.innerWidth / larguraRaiz : 1;
+      tz.api.setRect(
+        Math.round(r.x * escala),
+        Math.round(r.y * escala),
+        Math.round(r.width * escala),
+        Math.round(r.height * escala)
+      );
     }
     reportarRect();
     window.addEventListener("resize", reportarRect);

@@ -41,8 +41,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // CSP daquele contexto é o do próprio widget, não este.
   if (process.env.FLOW_TIZEN !== "1") await connection();
 
+  // Marca o documento como "app de TV" quando o build é o do widget (ver
+  // scripts/build-tizen.mjs). É por essa classe que o CSS aplica a ampliação
+  // de 10 pés e o realce de foco próprio da TV — coisas que não são
+  // compatibilidade com navegador velho, e sim decisão de design pra uma
+  // tela vista do sofá, a 3 metros, com controle remoto.
+  const classeTv = process.env.FLOW_TIZEN === "1" ? "tv-widget " : "";
+
   return (
-    <html lang="pt-BR" className={`h-full ${spaceGrotesk.variable}`}>
+    <html lang="pt-BR" className={`${classeTv}h-full ${spaceGrotesk.variable}`}>
       <body className="min-h-full">
         <NavRouterProvider>
           <ProfileProvider>{children}</ProfileProvider>

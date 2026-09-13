@@ -221,7 +221,15 @@ const relator = `(function () {
       // Se o app tivesse subido, o React já teria trocado o conteúdo do
       // body pela interface de verdade. Ainda ver o spinner aqui significa
       // que a hidratação não aconteceu.
-      avisar("[widget] 5s depois: hidratou=" + !document.querySelector(".center-loader"));
+      var w = window.webapis;
+      avisar(
+        "[widget] 5s depois: hidratou=" + !document.querySelector(".center-loader") +
+          " | webapis=" + (w ? "sim" : "NAO") +
+          " | avplay=" + (w && w.avplay ? "sim" : "NAO") +
+          " | viewport=" + document.documentElement.clientWidth + "x" + document.documentElement.clientHeight +
+          " | tela=" + screen.width + "x" + screen.height +
+          " | dpr=" + window.devicePixelRatio
+      );
     }, 5000);
   });
 })();`;
@@ -232,6 +240,22 @@ writeFileSync(join(destino, "tizen-boot.js"), relator);
 // rede estão de pé e o problema é execução de script; se nenhuma das duas
 // chegar, o widget não está conseguindo falar com o servidor, e aí é
 // <access>/privilege no config.xml, não código.
+// Os dois scripts que abrem o <head>, nesta ordem.
+//
+// webapis.js é o que DEFINE `window.webapis` — e com ele o `avplay`, o
+// player nativo que é a razão de o app estar dentro de um widget. Ele NÃO
+// vem sozinho: a TV só injeta se a página pedir, e sem esse pedido
+// `window.webapis` fica undefined, o bridge se dá por inativo e o player
+// cai no <video> de sempre, com o bug de busca que trouxe a gente até
+// aqui. `$WEBAPIS` é um caminho que o runtime da TV resolve sozinho (fica
+// fora da pasta do widget), e é assim que a Samsung documenta.
+//
+// Fora da TV esse src não existe e o navegador só ignora — o app segue no
+// <video>, como em qualquer PC/celular.
+const bootETizen =
+  '<script src="./tizen-boot.js"></script>' +
+  '<script src="$WEBAPIS/webapis/webapis.js"></script>';
+
 const farolSemJs =
   `<img src="${servidor.replace(/\/$/, "")}/api/tizen-debug?msg=` +
   `${encodeURIComponent("[widget] HTML parseou (sem JS) | versao=" + versao)}"` +
@@ -240,7 +264,7 @@ const farolSemJs =
 writeFileSync(
   indexHtml,
   readFileSync(indexHtml, "utf8")
-    .replace("<head>", '<head><script src="./tizen-boot.js"></script>')
+    .replace("<head>", "<head>" + bootETizen)
     .replace("<body", farolSemJs + "<body")
 );
 

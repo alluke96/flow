@@ -7,7 +7,16 @@ import { OVERLAY_HIDE_MS } from "./constants";
  * timer de auto-esconder — mas só esconde de fato se o vídeo ainda estiver
  * tocando (pausado, os controles ficam sempre visíveis).
  */
-export function useOverlayVisibility(videoRef: RefObject<HTMLVideoElement | null>) {
+export function useOverlayVisibility(
+  videoRef: RefObject<HTMLVideoElement | null>,
+  // Modo player nativo (AVPlay): não existe <video> nenhum pra perguntar se
+  // está tocando — quem sabe é o estado que vem da TV. Sem isto os
+  // controles NUNCA sumiam na TV (videoRef.current é sempre null lá), o que
+  // além de tapar o vídeo confundia a navegação por controle remoto, que
+  // muda de comportamento conforme os controles estão à vista ou não (ver
+  // tv-nav.ts).
+  nativeRef?: RefObject<{ paused: boolean }>
+) {
   const [overlayHidden, setOverlayHidden] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -15,9 +24,10 @@ export function useOverlayVisibility(videoRef: RefObject<HTMLVideoElement | null
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
       const v = videoRef.current;
-      if (v && !v.paused) setOverlayHidden(true);
+      const tocando = nativeRef ? !nativeRef.current.paused : Boolean(v && !v.paused);
+      if (tocando) setOverlayHidden(true);
     }, OVERLAY_HIDE_MS);
-  }, [videoRef]);
+  }, [videoRef, nativeRef]);
 
   const showOverlay = useCallback(() => {
     setOverlayHidden(false);

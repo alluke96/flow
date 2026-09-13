@@ -4,8 +4,13 @@ import { TIZEN_BACK_KEYCODE } from "./constants";
 /**
  * Espaço (play/pause), setas (±10s) e Esc/botão físico de voltar da TV
  * (exit). Registrado no document, não no player, pra funcionar não importa
- * onde o foco esteja (ex: um controle remoto de TV, sem mouse, só alcança
- * ±10s/±5s focando um botão primeiro — ver tv-nav.ts).
+ * onde o foco esteja.
+ *
+ * Divide as setas com a navegação por controle remoto (ver tv-nav.ts):
+ * enquanto os controles estão escondidos, Esquerda/Direita são busca ±10s;
+ * com eles à vista depois de um Cima/Baixo, andam com o foco pela linha —
+ * e aí chegam aqui já com defaultPrevented, que é como este handler sabe
+ * que não deve buscar também.
  */
 export function useKeyboardShortcuts({
   showOverlay,
@@ -47,13 +52,19 @@ export function useKeyboardShortcuts({
       // sempre que o foco estivesse em qualquer botão do player, ou seja,
       // na prática o tempo todo no controle remoto.
       const isRealFormControl = tag === "SELECT" || tag === "INPUT";
+      // Seta já consumida pela navegação por controle remoto (ver tv-nav.ts:
+      // com os controles à vista, Esquerda/Direita andam com o FOCO pela
+      // linha de botões em vez de buscar). O preventDefault de lá é o
+      // combinado — sem ler isto aqui, a mesma tecla moveria o foco E
+      // pularia 10s.
+      const jaTratada = e.defaultPrevented;
       if ((e.key === " " || e.code === "Space") && !isRealFormControl) {
         e.preventDefault();
         togglePlay();
         showOverlay();
-      } else if (e.key === "ArrowRight" && !isRealFormControl && !isSlider) {
+      } else if (e.key === "ArrowRight" && !isRealFormControl && !isSlider && !jaTratada) {
         seekBy(10);
-      } else if (e.key === "ArrowLeft" && !isRealFormControl && !isSlider) {
+      } else if (e.key === "ArrowLeft" && !isRealFormControl && !isSlider && !jaTratada) {
         seekBy(-10);
       } else if (e.key === "Escape" || e.keyCode === TIZEN_BACK_KEYCODE) {
         handleExit();

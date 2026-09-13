@@ -1692,20 +1692,109 @@ a {
     appearance: none;
   }
 
-  /* Anel de foco mais forte: é uma tela vista de longe, e sem
-     :focus-visible cada componente perde o realce próprio dele (o nosso
-     está todo escrito em :focus-visible) — sobra este, então ele precisa
-     dar conta sozinho. */
-  :focus {
-    outline-width: 4px;
-    outline-offset: 5px;
-    box-shadow: 0 0 0 9px rgba(10, 132, 255, 0.22);
-  }
-  /* Os dois campos de texto tiram o anel de propósito e marcam o foco só
-     pela cor da borda — de longe, no sofá, isso não se vê. */
-  .modal input[type="text"]:focus,
-  .search-input:focus {
-    outline: 3px solid var(--accent-2);
-    outline-offset: 2px;
-  }
+}
+
+/* ==========================================================================
+   App de TV: ampliação de 10 pés e realce de foco
+   ==========================================================================
+   `tv-widget` entra no <html> só no build do widget (ver src/app/layout.tsx).
+   Nada aqui é compatibilidade — é o app sendo olhado de 3 metros de
+   distância, com controle remoto, onde o que serve pra um monitor a 60cm
+   fica pequeno demais e o foco precisa gritar onde está. */
+
+/* Uma ampliação só, na raiz, em vez de reescrever tamanho por tamanho:
+   `zoom` multiplica TUDO junto (texto, ícone, logo, botão, espaçamento),
+   que é exatamente o pedido — e mantém as proporções do desenho da web.
+   Efeito colateral a lembrar: `vh`/`vw` NÃO são ampliados junto (continuam
+   valendo a tela inteira), então quem usa isso precisa dividir pelo mesmo
+   fator — ver .profiles-screen abaixo. */
+html.tv-widget {
+  zoom: 1.35;
+}
+
+/* 100vh ampliado 1.35x daria uma tela e um terço de altura, com rolagem
+   sobrando embaixo. Dividir devolve a altura real da TV. */
+html.tv-widget .profiles-screen {
+  min-height: calc(100vh / 1.35);
+}
+
+/* Banner e hero têm altura fixa (ver o bloco @supports): ampliados, comiam
+   a tela inteira e empurravam todo o resto pra fora. */
+html.tv-widget .hero {
+  height: 520px;
+}
+html.tv-widget .detail-banner {
+  height: 380px;
+}
+
+/* ---------- Foco ----------
+   O anel branco é o que se enxerga de longe em cima de qualquer pôster; o
+   halo azul dá o volume, e a sombra descola o elemento do fundo. E como o
+   realce que cada componente tem na web está escrito em :focus-visible
+   (que esta TV não conhece, ver o bloco @supports), cada um deles é
+   repetido aqui em :focus — é isso que faz o foco na TV parecer o mesmo
+   desenho do site, e não uma caixinha genérica em volta de tudo. */
+html.tv-widget :focus {
+  outline: 3px solid #fff;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 9px rgba(10, 132, 255, 0.38), 0 10px 40px rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+}
+
+html.tv-widget .card:focus {
+  transform: scale(1.08);
+  z-index: 2;
+}
+html.tv-widget .card:focus .card-resume-badge {
+  opacity: 1;
+}
+html.tv-widget .profile-avatar-btn:focus {
+  transform: scale(1.08);
+}
+html.tv-widget .profile-avatar-btn:focus .profile-edit-badge {
+  opacity: 1;
+}
+html.tv-widget .profiles-manage-btn:focus {
+  color: var(--text);
+  border-color: #444;
+}
+html.tv-widget .profiles-refresh-btn:focus {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+html.tv-widget .brand:focus {
+  opacity: 0.8;
+}
+html.tv-widget .back-btn:focus {
+  background: rgba(0, 0, 0, 0.75);
+  transform: scale(1.08);
+}
+html.tv-widget .episode:focus {
+  background: rgba(255, 255, 255, 0.08);
+}
+html.tv-widget .season-chip:focus {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--text);
+}
+html.tv-widget .player-top button:focus,
+html.tv-widget .player-center button:focus,
+html.tv-widget .player-controls-row button:focus {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.16);
+}
+html.tv-widget .next-up-toast button:focus {
+  background: rgba(255, 255, 255, 0.24);
+}
+html.tv-widget .rate-select:focus {
+  background: rgba(255, 255, 255, 0.16);
+}
+/* A barra de progresso é fina demais pra um anel em volta ficar bom: o
+   indicador dela é a bolinha crescendo, igual ao hover/arrasto na web. */
+html.tv-widget .progress-bar:focus {
+  outline: none;
+  box-shadow: none;
+}
+html.tv-widget .progress-bar:focus .progress-handle {
+  transform: translate(-50%, -50%) scale(1.5);
+  box-shadow: 0 0 0 8px rgba(255, 69, 58, 0.28);
 }

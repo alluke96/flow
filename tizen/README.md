@@ -112,7 +112,20 @@ nenhuma. Se o validador reclamar de alguma coisa ao adicionar, é a
 mensagem dele que manda, não este texto.)
 
 O AVPlay não precisa de privilege: desde os modelos de 2015 a Samsung não
-exige mais isso.
+exige mais isso. O que ele precisa é do `webapis.js` — a TV só define
+`window.webapis` (e com ele o `avplay`) se a página pedir esse script, e
+sem ele o player cai calado no `<video>` de sempre, com o bug de busca de
+volta. O build já injeta a linha no `index.html`:
+
+```html
+<script src="$WEBAPIS/webapis/webapis.js"></script>
+```
+
+`$WEBAPIS` é resolvido pelo runtime da TV e aponta pra fora da pasta do
+widget. Se a CSP estiver barrando (`script-src 'self'`), isso aparece no
+`flow.log` como violação de CSP — e o balanço de 5s do `tizen-boot.js`
+passou a dizer `webapis=sim/NAO`, que é a resposta direta pra "o player
+nativo está mesmo em uso?".
 
 ### Ícone
 
@@ -185,6 +198,21 @@ eterno, sem erro visível) e causas diferentes:
 Se um dia o app voltar a ficar num carregamento eterno depois de atualizar
 dependência, o primeiro lugar pra olhar é o `flow.log`: o erro vem de lá
 com nome e arquivo.
+
+## Tamanho e foco na TV
+
+O build do widget marca o `<html>` com a classe `tv-widget` (ver
+`src/app/layout.tsx`), e é ela que liga, em `globals.css`:
+
+- **A ampliação de 10 pés** — `zoom: 1.35` na raiz. Uma ampliação só, em
+  vez de reescrever tamanho por tamanho: multiplica texto, ícone, logo,
+  botão e espaçamento juntos, mantendo as proporções do desenho da web. Pra
+  mudar o quanto, é esse número. Cuidado com `vh`/`vw`: eles NÃO são
+  ampliados junto, então quem usa isso precisa dividir pelo mesmo fator.
+- **O realce de foco** — anel branco, halo azul e sombra, mais o realce
+  próprio de cada componente (o pôster crescendo, o episódio acendendo).
+  Na web isso tudo está escrito em `:focus-visible`, que esta TV não
+  conhece, então aparece repetido ali em `:focus`.
 
 ## Limitação conhecida
 
