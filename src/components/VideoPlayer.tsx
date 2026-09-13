@@ -392,6 +392,13 @@ export function VideoPlayer({
   const pct = duration ? (currentTime / duration) * 100 : 0;
   const bufferedPct = duration ? (bufferedEnd / duration) * 100 : 0;
 
+  const botaoProximo = onNextEpisode ? (
+    <button className="next-ep-btn" onClick={onNextEpisode} aria-label="Próximo episódio">
+      <span>Próximo</span>
+      <NextEpisodeIcon />
+    </button>
+  ) : null;
+
   return (
     <div
       ref={shellRef}
@@ -502,7 +509,24 @@ export function VideoPlayer({
           />
         )}
 
+        {/* No player nativo da TV a linha de baixo perde três controles, e
+            nenhum dos três sai por gosto — nenhum tem o que fazer lá:
+
+            - velocidade: o AVPlay recusa qualquer valor diferente de 1x
+              ("Internal error"), então o controle só existiria pra não
+              funcionar — e ainda é o único da linha que abre uma lista do
+              sistema por cima do vídeo;
+            - volume: o AVPlay não tem volume próprio, é sempre o do
+              aparelho, que se mexe pelo controle remoto;
+            - tela cheia: o app JÁ é a tela inteira da TV.
+
+            Num controle remoto cada item a mais é um passo a mais pra
+            atravessar até o que interessa. Sobrando só o "Próximo", ele sai
+            da linha e vai pra cima da barra, encostado à direita: de lá o
+            D-pad chega nele com um toque, em vez de descer até a linha e
+            andar de lado. */}
         <div className="player-bottom">
+          {nativeMode && botaoProximo && <div className="player-acao-solta">{botaoProximo}</div>}
           <ProgressBar
             progressRef={progressRef}
             currentTime={currentTime}
@@ -517,21 +541,22 @@ export function VideoPlayer({
             onPointerLeave={handlePointerLeave}
             onKeyDown={(e) => handleProgressKeyDown(e, seekBy)}
           />
-          <div className="player-controls-row">
-            <VolumeControl muted={muted} volume={volume} onToggleMute={toggleMute} onVolumeChange={handleVolumeChange} />
-            <RateSelect rate={rate} onChange={handleRateChange} />
-
-            {onNextEpisode && (
-              <button className="next-ep-btn" onClick={onNextEpisode} aria-label="Próximo episódio">
-                <span>Próximo</span>
-                <NextEpisodeIcon />
+          {!nativeMode && (
+            <div className="player-controls-row">
+              <VolumeControl
+                muted={muted}
+                volume={volume}
+                onToggleMute={toggleMute}
+                onVolumeChange={handleVolumeChange}
+              />
+              <RateSelect rate={rate} onChange={handleRateChange} />
+              {botaoProximo}
+              <div className="spacer" />
+              <button onClick={toggleFullscreen} aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}>
+                {isFullscreen ? <FullscreenExitIcon /> : <FullscreenEnterIcon />}
               </button>
-            )}
-            <div className="spacer" />
-            <button onClick={toggleFullscreen} aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}>
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenEnterIcon />}
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

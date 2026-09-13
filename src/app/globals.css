@@ -1170,6 +1170,14 @@ a {
   white-space: nowrap;
   pointer-events: none;
 }
+/* Uma ação sozinha acima da barra de progresso, encostada à direita — hoje
+   só o "Próximo" do player de TV (ver VideoPlayer). */
+.player-acao-solta {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
 .player-controls-row {
   display: flex;
   align-items: center;
