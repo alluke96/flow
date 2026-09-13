@@ -111,6 +111,27 @@ export function DebugOverlay() {
   // casca responde "ack" pra qualquer "ready" que chegar, não é amarrado a
   // uma instância específica de player.
   const tzDebug = useTizenPlayer();
+  // Diagnóstico cru, SEM filtrar por canal — pra separar duas causas bem
+  // diferentes de "AVPlay inativo": a casca nunca manda mensagem NENHUMA
+  // (postMessage quebrado nessa direção nesta TV) vs manda mensagem mas com
+  // um formato que useTizenPlayer não reconhece (bug no formato/canal). Se
+  // isto aqui continuar em 0 mesmo com a casca já reinstalada, o problema é
+  // no postMessage em si, não no código do bridge.
+  const [msgCount, setMsgCount] = useState(0);
+  const [lastMsg, setLastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onAnyMessage(e: MessageEvent) {
+      setMsgCount((n) => n + 1);
+      try {
+        setLastMsg(JSON.stringify(e.data).slice(0, 200));
+      } catch {
+        setLastMsg(String(e.data).slice(0, 200));
+      }
+    }
+    window.addEventListener("message", onAnyMessage);
+    return () => window.removeEventListener("message", onAnyMessage);
+  }, []);
 
   useEffect(() => {
     const sync = () => setOn(isDebugEnabled());
@@ -196,13 +217,17 @@ export function DebugOverlay() {
       <div style={{ color: "#fff", marginBottom: 4 }}>
         DEBUG — toque 5x na versão pra desligar
       </div>
-      <div style={{ color: tzDebug.active ? "#3ddc4a" : "#ff6b6b", marginBottom: 6 }}>
+      <div style={{ color: tzDebug.active ? "#3ddc4a" : "#ff6b6b", marginBottom: 2 }}>
         AVPlay:{" "}
         {tzDebug.active === null
           ? "detectando…"
           : tzDebug.active
             ? `ATIVO (t=${tzDebug.state.currentTime.toFixed(1)}/${tzDebug.state.duration.toFixed(1)} paused=${tzDebug.state.paused} buffering=${tzDebug.state.buffering} seeking=${tzDebug.state.seeking}${tzDebug.state.error ? ` erro=${tzDebug.state.error}` : ""})`
             : "inativo — usando <video> normal"}
+      </div>
+      <div style={{ color: "#8c8c8c", marginBottom: 6, wordBreak: "break-all" }}>
+        postMessage recebidos: {msgCount}
+        {lastMsg && <><br />último: {lastMsg}</>}
       </div>
       {videoInfo && (
         <div style={{ color: "#ffd23d", marginBottom: 6, wordBreak: "break-all", whiteSpace: "pre-line" }}>
