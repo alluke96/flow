@@ -19,3 +19,13 @@ export const TIZEN_BACK_KEYCODE = 10009;
 export const PASSO_SETA = 10;
 /** O mesmo, com a barra de progresso focada: passo mais fino. */
 export const PASSO_BARRA = 5;
+
+/**
+ * A que distância do fim um "acabou" ainda conta como fim de verdade.
+ *
+ * O player anuncia "acabou" do mesmo jeito quando o vídeo termina e quando
+ * o stream é cortado no meio (servidor fora do ar, erro no meio da
+ * entrega, rede caindo). Sem essa distinção, uma falha aos 5 minutos de um
+ * episódio de 40 mandava o usuário pro PRÓXIMO episódio.
+ */
+export const TOLERANCIA_FIM_S = 20;

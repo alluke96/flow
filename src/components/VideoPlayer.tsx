@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useProfiles } from "@/context/profile-context";
 import { streamUrl } from "@/lib/api-client";
+import { fmtTime } from "@/lib/format";
 import { useTizenPlayer } from "@/lib/tizen-player-bridge";
 import { FullscreenEnterIcon, FullscreenExitIcon, NextEpisodeIcon } from "./player-icons";
+import { TOLERANCIA_FIM_S } from "./player/constants";
 import { NextUpToast } from "./player/NextUpToast";
 import { PlaybackErrorPanel } from "./player/PlaybackErrorPanel";
 import { PlayerCenterControls } from "./player/PlayerCenterControls";
@@ -282,6 +284,23 @@ export function VideoPlayer({
   }, [setDuration, resumePlayback]);
 
   function handleEnded() {
+    // "Acabou" longe do fim não é fim: é o stream tendo sido cortado no
+    // meio (erro do servidor, entrega interrompida, rede caindo). O player
+    // anuncia as duas coisas do mesmo jeito, e tratar tudo como fim jogava
+    // o usuário no próximo episódio bem no meio do que ele estava vendo.
+    // Aqui vira o que de fato é: uma falha de reprodução, com o ponto
+    // salvo pra poder continuar de onde parou.
+    if (duration > 0 && currentTime < duration - TOLERANCIA_FIM_S) {
+      doSaveProgress();
+      setPlaybackErrorDetail({
+        code: 2,
+        message: `a reprodução parou em ${fmtTime(currentTime)} de ${fmtTime(duration)}`,
+      });
+      setPlaybackError(true);
+      setLoading(false);
+      setPlaying(false);
+      return;
+    }
     setEnded(true);
     doSaveProgress();
     if (onNextEpisode) startCountdown();
