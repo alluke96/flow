@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { PASSO_BARRA } from "./constants";
 import type { ProgressPreview } from "./types";
 
 /**
@@ -76,9 +77,16 @@ export function useProgressBarDrag({
     if (!draggingRef.current) setPreview(null);
   }
 
-  function handleKeyDown(e: KeyboardEvent, seekBy: (delta: number) => void) {
-    if (e.key === "ArrowRight") seekBy(5);
-    else if (e.key === "ArrowLeft") seekBy(-5);
+  function handleKeyDown(
+    e: KeyboardEvent,
+    seekBy: (delta: number) => void,
+    passoDeBusca: (direcao: 1 | -1, passoBase: number) => number
+  ) {
+    // Mesma aceleração das setas soltas (ver useSeekAcelerado), com passo
+    // base menor: com a barra focada o ajuste começa mais fino, e segurar
+    // continua sendo o jeito de atravessar o filme.
+    if (e.key === "ArrowRight") seekBy(passoDeBusca(1, PASSO_BARRA));
+    else if (e.key === "ArrowLeft") seekBy(passoDeBusca(-1, PASSO_BARRA));
   }
 
   return {

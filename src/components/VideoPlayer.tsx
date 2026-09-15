@@ -19,6 +19,7 @@ import { useFullscreen } from "./player/useFullscreen";
 import { useKeyboardShortcuts } from "./player/useKeyboardShortcuts";
 import { useNextEpisodeCountdown } from "./player/useNextEpisodeCountdown";
 import { useOverlayVisibility } from "./player/useOverlayVisibility";
+import { useSeekAcelerado } from "./player/useSeekAcelerado";
 import { usePlaybackActions } from "./player/usePlaybackActions";
 import { usePlaybackTime } from "./player/usePlaybackTime";
 import { useProgressBarDrag } from "./player/useProgressBarDrag";
@@ -237,6 +238,8 @@ export function VideoPlayer({
     handleKeyDown: handleProgressKeyDown,
   } = useProgressBarDrag({ duration, seekToPct, showOverlay });
   const { isFullscreen, toggleFullscreen } = useFullscreen(videoRef, shellRef);
+  // Segurar a seta acelera a busca — ver useSeekAcelerado.
+  const passoDeBusca = useSeekAcelerado();
   const { nextCountdown, startCountdown, cancelCountdown } = useNextEpisodeCountdown(onNextEpisode);
 
   const doSaveProgress = useProgressPersistence({
@@ -255,7 +258,7 @@ export function VideoPlayer({
   });
   const resumePlayback = useResumePlayback(videoRef, initialTime, setMuted);
 
-  useKeyboardShortcuts({ showOverlay, togglePlay, seekBy, handleExit });
+  useKeyboardShortcuts({ showOverlay, togglePlay, seekBy, passoDeBusca, handleExit });
 
   const src = streamUrl(titleId, episodeId);
   // Capturados em ref pro efeito de abertura do AVPlay (abaixo) não precisar
@@ -539,7 +542,7 @@ export function VideoPlayer({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerLeave}
-            onKeyDown={(e) => handleProgressKeyDown(e, seekBy)}
+            onKeyDown={(e) => handleProgressKeyDown(e, seekBy, passoDeBusca)}
           />
           {!nativeMode && (
             <div className="player-controls-row">

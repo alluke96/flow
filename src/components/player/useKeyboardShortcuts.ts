@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { TIZEN_BACK_KEYCODE } from "./constants";
+import { PASSO_SETA, TIZEN_BACK_KEYCODE } from "./constants";
 
 /**
  * Espaço (play/pause), setas (±10s) e Esc/botão físico de voltar da TV
@@ -16,11 +16,14 @@ export function useKeyboardShortcuts({
   showOverlay,
   togglePlay,
   seekBy,
+  passoDeBusca,
   handleExit,
 }: {
   showOverlay: () => void;
   togglePlay: () => void;
   seekBy: (delta: number) => void;
+  /** Ver useSeekAcelerado: cresce enquanto a seta fica pressionada. */
+  passoDeBusca: (direcao: 1 | -1, passoBase: number) => number;
   handleExit: () => void;
 }) {
   useEffect(() => {
@@ -63,14 +66,14 @@ export function useKeyboardShortcuts({
         togglePlay();
         showOverlay();
       } else if (e.key === "ArrowRight" && !isRealFormControl && !isSlider && !jaTratada) {
-        seekBy(10);
+        seekBy(passoDeBusca(1, PASSO_SETA));
       } else if (e.key === "ArrowLeft" && !isRealFormControl && !isSlider && !jaTratada) {
-        seekBy(-10);
+        seekBy(passoDeBusca(-1, PASSO_SETA));
       } else if (e.key === "Escape" || e.keyCode === TIZEN_BACK_KEYCODE) {
         handleExit();
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [showOverlay, togglePlay, seekBy, handleExit]);
+  }, [showOverlay, togglePlay, seekBy, passoDeBusca, handleExit]);
 }

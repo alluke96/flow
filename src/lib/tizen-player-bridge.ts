@@ -713,6 +713,15 @@ export function useTizenPlayer(): UseTizenPlayerResult {
         const teto = estadoRef.current.duration || Infinity;
         const alvo = Math.min(Math.max(0, base + delta), teto);
 
+        // Já existe uma reabertura no forno: a busca de verdade JÁ foi
+        // recusada nesta sessão, e insistir a cada tecla — segurando a
+        // seta são muitas por segundo — só rende uma recusa e uma linha de
+        // log por toque. Aqui basta mover o destino.
+        if (alvoPendenteRef.current !== null) {
+          agendarReabertura(alvo);
+          return alvo;
+        }
+
         // jumpForward/jumpBackward são os métodos que a Samsung fez pra
         // este caso, e o cálculo acontece dentro do player. Nesta TV eles
         // são recusados como qualquer outra busca, e aí o pedido vira uma

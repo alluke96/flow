@@ -14,3 +14,8 @@ export const NEXT_EPISODE_COUNTDOWN_S = 5;
 // the same key as Escape — handled alongside Escape so the remote's back
 // button exits the player directly, same as Escape does on a keyboard.
 export const TIZEN_BACK_KEYCODE = 10009;
+
+/** Salto de um toque solto na seta. Segurando, ele cresce — ver useSeekAcelerado. */
+export const PASSO_SETA = 10;
+/** O mesmo, com a barra de progresso focada: passo mais fino. */
+export const PASSO_BARRA = 5;
